@@ -39,17 +39,7 @@ deploy-conf: check-server-id deploy-db-conf deploy-nginx-conf deploy-service-fil
 
 # ベンチマークを走らせる直前に実行する
 .PHONY: bench
-bench: check-server-id discocat-now-status rm-logs check-commit deploy-kayac watch-log-kayac
-# bench: check-server-id discocat-now-status rm-logs deploy-conf restart watch-service-log
-
-.PHONY: deploy-kayac
-deploy-kayac:
-	docker-compose -f webapp/docker-compose.yml down
-	docker-compose -f webapp/docker-compose.yml up --build -d
-
-.PHONY: watch-log-kayac
-watch-log-kayac:
-	docker logs webapp-app-1 -f
+bench: check-server-id discocat-now-status rm-logs deploy-conf restart watch-service-log
 
 # slow queryを確認する
 .PHONY: slow-query
@@ -181,7 +171,6 @@ deploy-service-file:
 deploy-envsh:
 	cp ~/$(SERVER_ID)/home/isucon/env.sh ~/env.sh
 
-# 今回はビルドの必要なし
 .PHONY: build
 build:
 	cd $(BUILD_DIR); \
@@ -240,16 +229,3 @@ discocat-now-status:
 check-commit:
 	mkdir -p tmp/check-commit
 	go run tool-config/check-commit/main.go
-
-.PHONY: run-bench
-run-bench:
-	mkdir -p tmp/bench-log
-	-@cd bench && ./bench -target-url http://localhost:80 > ~/tmp/bench-log/bench-log
-	@make refresh-descocat-tmp
-	cat $(DISCOCAT_TRIPLE_BACK_QUOTES) >> $(DISCOCAT_TMPFILE)
-	echo "" >> $(DISCOCAT_TMPFILE)
-	echo "Bench" >> $(DISCOCAT_TMPFILE)
-	echo "" >> $(DISCOCAT_TMPFILE)
-	cat ~/tmp/bench-log/bench-log >> $(DISCOCAT_TMPFILE)
-	cat $(DISCOCAT_TRIPLE_BACK_QUOTES) >> $(DISCOCAT_TMPFILE)
-	cat $(DISCOCAT_TMPFILE) | discocat
