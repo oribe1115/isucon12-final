@@ -14,6 +14,7 @@ require (
 )
 
 require (
+	github.com/cespare/xxhash v1.1.0 // indirect
 	github.com/golang-jwt/jwt v3.2.2+incompatible // indirect
 	github.com/google/pprof v0.0.0-20211214055906-6f57359322fd // indirect
 	github.com/labstack/gommon v0.3.1 // indirect

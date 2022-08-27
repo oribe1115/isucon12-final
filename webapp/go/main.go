@@ -57,8 +57,14 @@ type Handler struct {
 	DB3 *sqlx.DB
 }
 
+func xor64(x int64) int64 {
+	x = x ^ (x << 13)
+	x = x ^ (x >> 7)
+	return x ^ (x << 17)
+}
+
 func (h *Handler) getDB(userID int64) *sqlx.DB {
-	return []*sqlx.DB{h.DB, h.DB2, h.DB3}[userID%3]
+	return []*sqlx.DB{h.DB2, h.DB3}[xor64(userID)%2]
 }
 
 func main() {
