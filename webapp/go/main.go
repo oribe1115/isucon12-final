@@ -643,7 +643,7 @@ func (h *Handler) obtainItems(tx *sqlx.Tx, userID int64, obtainItemData []*Obtai
 		return nil, nil, nil, err
 	}
 
-	cards, err := obtainCards(tx, userID, cardRequests)
+	cards, err := h.obtainCards(tx, userID, cardRequests)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -678,7 +678,48 @@ func obtainCoins(tx *sqlx.Tx, userID int64, obtainItemData []*ObtainItemDatum) (
 	return nil, nil
 }
 
-func obtainCards(tx *sqlx.Tx, userID int64, obtainItemData []*ObtainItemDatum) ([]*UserCard, error) {
+func (h *Handler) obtainCards(tx *sqlx.Tx, userID int64, obtainItemData []*ObtainItemDatum) ([]*UserCard, error) {
+	query := "SELECT * FROM item_masters WHERE id IN (?)"
+	itemIDs := lo.Map(obtainItemData, func(d *ObtainItemDatum, _ int) int64 { return d.ItemID })
+	itemIDs = lo.Uniq(itemIDs)
+	query, params, err := sqlx.In(query, itemIDs)
+	if err != nil {
+		return nil, err
+	}
+	var items []*ItemMaster
+	if err := tx.Select(&items, query, params...); err != nil {
+		return nil, err
+	}
+	if len(items) != len(itemIDs) {
+		return nil, ErrItemNotFound
+	}
+	itemsMaster := lo.SliceToMap(items, func(i *ItemMaster) (int64, *ItemMaster) { return i.ID, i })
+
+	cards := make([]*UserCard, 0, len(obtainItemData))
+	for _, d := range obtainItemData {
+		cID, err := h.generateID()
+		if err != nil {
+			return nil, err
+		}
+		item, ok := itemsMaster[d.ItemID]
+		if !ok {
+			return nil, errors.New("item not found from master")
+		}
+		cards = append(cards, &UserCard{
+			ID:           cID,
+			UserID:       userID,
+			CardID:       item.ID,
+			AmountPerSec: *item.AmountPerSec,
+			Level:        1,
+			TotalExp:     0,
+			CreatedAt:    d.RequestAt,
+			UpdatedAt:    d.RequestAt,
+		})
+	}
+	query = "INSERT INTO user_cards(id, user_id, card_id, amount_per_sec, level, total_exp, created_at, updated_at) VALUES (:id, :user_id, :card_id, :amount_per_sec, :level, :total_exp, :created_at, :updated_at)"
+	if _, err := tx.NamedExec(query, cards); err != nil {
+		return nil, err
+	}
 	return nil, nil
 }
 
