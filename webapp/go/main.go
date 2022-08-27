@@ -572,6 +572,38 @@ func (h *Handler) obtainPresent(tx *sqlx.Tx, userID int64, requestAt int64) ([]*
 	return obtainPresents, nil
 }
 
+type ObtainItemDatum struct {
+	ItemID       int64
+	ItemType     int
+	ObtainAmount int64
+	RequestAt    int64
+}
+
+func (h *Handler) obtainItems(tx *sqlx.Tx, userID int64, obtainItemData []*ObtainItemDatum) ([]int64, []*UserCard, []*UserItem, error) {
+	coinRequests := make([]*ObtainItemDatum, 0)
+	cardRequests := make([]*ObtainItemDatum, 0)
+	otherRequests := make([]*ObtainItemDatum, 0)
+
+	// filter
+
+	coins, err := obtainCoins(tx, userID, coinRequests)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+}
+
+func obtainCoins(tx *sqlx.Tx, userID int64, obtainItemData []*ObtainItemDatum) ([]int64, error) {
+	return nil, nil
+}
+
+func obtainCards(tx *sqlx.Tx, userID int64, obtainItemData []*ObtainItemDatum) ([]*UserCard, error) {
+	return nil, nil
+}
+
+func obtainOthers(tx *sqlx.Tx, userID int64, obtainItemData []*ObtainItemDatum) ([]*UserItem, error) {
+	return nil, nil
+}
+
 // obtainItem アイテム付与処理
 func (h *Handler) obtainItem(tx *sqlx.Tx, userID, itemID int64, itemType int, obtainAmount int64, requestAt int64) ([]int64, []*UserCard, []*UserItem, error) {
 	obtainCoins := make([]int64, 0)
