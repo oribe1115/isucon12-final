@@ -266,7 +266,7 @@ func (h *Handler) checkOneTimeToken(token string, tokenType int, requestAt int64
 
 	// 使ったトークンを失効する
 	query = "DELETE FROM user_one_time_tokens WHERE token=?"
-	if _, err := h.DB.Exec(query, requestAt, token); err != nil {
+	if _, err := h.DB.Exec(query, token); err != nil {
 		return err
 	}
 
@@ -1013,7 +1013,7 @@ func (h *Handler) listGacha(c echo.Context) error {
 
 	// genearte one time token
 	query = "DELETE FROM user_one_time_tokens WHERE user_id=?"
-	if _, err = h.DB.Exec(query, requestAt, userID); err != nil {
+	if _, err = h.DB.Exec(query, userID); err != nil {
 		return errorResponse(c, http.StatusInternalServerError, err)
 	}
 	tID, err := h.generateID()
