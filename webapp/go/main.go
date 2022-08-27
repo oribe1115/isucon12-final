@@ -121,6 +121,11 @@ func main() {
 	defer dbx3.Close()
 	defer dbx4.Close()
 
+	dbx.SetMaxOpenConns(500)
+	dbx2.SetMaxOpenConns(500)
+	dbx3.SetMaxOpenConns(500)
+	dbx4.SetMaxOpenConns(500)
+
 	// setting server
 	e.Server.Addr = fmt.Sprintf(":%v", "8080")
 	h := &Handler{
