@@ -57,6 +57,10 @@ type Handler struct {
 	DB3 *sqlx.DB
 }
 
+func (h *Handler) getDB(userID int64) *sqlx.DB {
+	return []*sqlx.DB{h.DB, h.DB2, h.DB3}[userID%3]
+}
+
 func main() {
 
 	// http.DefaultServeMux.Handle("/debug/pprof/profile", fgprof.Handler())
@@ -523,7 +527,8 @@ func (h *Handler) obtainPresent(tx *sqlx.Tx, userID int64, requestAt int64) ([]*
 
 	if len(obtainPresents) > 0 {
 		query = "INSERT INTO user_presents(id, user_id, sent_at, item_type, item_id, amount, present_message, created_at, updated_at) VALUES (:id, :user_id, :sent_at, :item_type, :item_id, :amount, :present_message, :created_at, :updated_at)"
-		if _, err := tx.NamedExec(query, obtainPresents); err != nil {
+		//TXをはがしたので要注意
+		if _, err := h.getDB(userID).NamedExec(query, obtainPresents); err != nil {
 			return nil, err
 		}
 	}
@@ -1236,8 +1241,9 @@ func (h *Handler) drawGacha(c echo.Context) error {
 		}
 		presents = append(presents, present)
 	}
+	//TXをはがしたので要注意
 	query = "INSERT INTO user_presents(id, user_id, sent_at, item_type, item_id, amount, present_message, created_at, updated_at) VALUES (:id, :user_id, :sent_at, :item_type, :item_id, :amount, :present_message, :created_at, :updated_at)"
-	if _, err := tx.NamedExec(query, presents); err != nil {
+	if _, err := h.getDB(userID).NamedExec(query, presents); err != nil {
 		return errorResponse(c, http.StatusInternalServerError, err)
 	}
 
@@ -1290,12 +1296,12 @@ func (h *Handler) listPresent(c echo.Context) error {
 	WHERE user_id = ? AND deleted_at IS NULL
 	ORDER BY created_at DESC, id
 	LIMIT ? OFFSET ?`
-	if err = h.DB.Select(&presentList, query, userID, PresentCountPerPage, offset); err != nil {
+	if err = h.getDB(userID).Select(&presentList, query, userID, PresentCountPerPage, offset); err != nil {
 		return errorResponse(c, http.StatusInternalServerError, err)
 	}
 
 	var presentCount int
-	if err = h.DB.Get(&presentCount, "SELECT COUNT(*) FROM user_presents WHERE user_id = ? AND deleted_at IS NULL", userID); err != nil {
+	if err = h.getDB(userID).Get(&presentCount, "SELECT COUNT(*) FROM user_presents WHERE user_id = ? AND deleted_at IS NULL", userID); err != nil {
 		return errorResponse(c, http.StatusInternalServerError, err)
 	}
 
@@ -1353,7 +1359,7 @@ func (h *Handler) receivePresent(c echo.Context) error {
 		return errorResponse(c, http.StatusBadRequest, err)
 	}
 	obtainPresent := []*UserPresent{}
-	if err = h.DB.Select(&obtainPresent, query, params...); err != nil {
+	if err = h.getDB(userID).Select(&obtainPresent, query, params...); err != nil {
 		return errorResponse(c, http.StatusBadRequest, err)
 	}
 
@@ -1368,6 +1374,11 @@ func (h *Handler) receivePresent(c echo.Context) error {
 		return errorResponse(c, http.StatusInternalServerError, err)
 	}
 	defer tx.Rollback() //nolint:errcheck
+	txUID, err := h.getDB(userID).Beginx()
+	if err != nil {
+		return errorResponse(c, http.StatusInternalServerError, err)
+	}
+	defer txUID.Rollback() //nolint:errcheck
 	query = "UPDATE user_presents SET deleted_at=?, updated_at=? WHERE id IN (?)"
 	ids := make([]int64, 0, len(obtainPresent))
 	for _, v := range obtainPresent {
@@ -1377,7 +1388,7 @@ func (h *Handler) receivePresent(c echo.Context) error {
 	if err != nil {
 		return errorResponse(c, http.StatusBadRequest, err)
 	}
-	_, err = tx.Exec(query, params...)
+	_, err = txUID.Exec(query, params...)
 	if err != nil {
 		return errorResponse(c, http.StatusInternalServerError, err)
 	}
@@ -1404,6 +1415,10 @@ func (h *Handler) receivePresent(c echo.Context) error {
 		}
 	}
 	err = tx.Commit()
+	if err != nil {
+		return errorResponse(c, http.StatusInternalServerError, err)
+	}
+	err = txUID.Commit()
 	if err != nil {
 		return errorResponse(c, http.StatusInternalServerError, err)
 	}
