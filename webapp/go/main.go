@@ -2,6 +2,7 @@ package main
 
 import (
 	"database/sql"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -16,6 +17,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/cespare/xxhash"
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
@@ -57,14 +59,16 @@ type Handler struct {
 	DB3 *sqlx.DB
 }
 
-func xor64(x int64) int64 {
-	x = x ^ (x << 13)
-	x = x ^ (x >> 7)
-	return x ^ (x << 17)
+func userXXHash(userID int64) uint64 {
+	x := xxhash.New()
+	var b [8]byte
+	binary.LittleEndian.PutUint64(b[:], uint64(userID))
+	_, _ = x.Write(b[:])
+	return x.Sum64()
 }
 
 func (h *Handler) getDB(userID int64) *sqlx.DB {
-	return []*sqlx.DB{h.DB2, h.DB3}[xor64(userID)%2]
+	return []*sqlx.DB{h.DB2, h.DB3}[userXXHash(userID)%2]
 }
 
 func main() {
@@ -534,7 +538,7 @@ func (h *Handler) obtainPresent(tx *sqlx.Tx, userID int64, requestAt int64) ([]*
 
 	if len(obtainPresents) > 0 {
 		query = "INSERT INTO user_presents(id, user_id, sent_at, item_type, item_id, amount, present_message, created_at, updated_at) VALUES (:id, :user_id, :sent_at, :item_type, :item_id, :amount, :present_message, :created_at, :updated_at)"
-		//TXをはがしたので要注意
+		// TXをはがしたので要注意
 		if _, err := h.getDB(userID).NamedExec(query, obtainPresents); err != nil {
 			return nil, err
 		}
@@ -1261,7 +1265,7 @@ func (h *Handler) drawGacha(c echo.Context) error {
 		}
 		presents = append(presents, present)
 	}
-	//TXをはがしたので要注意
+	// TXをはがしたので要注意
 	query = "INSERT INTO user_presents(id, user_id, sent_at, item_type, item_id, amount, present_message, created_at, updated_at) VALUES (:id, :user_id, :sent_at, :item_type, :item_id, :amount, :present_message, :created_at, :updated_at)"
 	if _, err := h.getDB(userID).NamedExec(query, presents); err != nil {
 		return errorResponse(c, http.StatusInternalServerError, err)
