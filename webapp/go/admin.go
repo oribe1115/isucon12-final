@@ -287,8 +287,13 @@ func (h *Handler) adminUpdateMaster(c echo.Context) error {
 			"VALUES (:id, :item_type, :name, :description, :amount_per_sec, :max_level, :max_amount_per_sec, :base_exp_per_level, :gained_exp, :shortening_min)",
 			"ON DUPLICATE KEY UPDATE item_type=VALUES(item_type), name=VALUES(name), description=VALUES(description), amount_per_sec=VALUES(amount_per_sec), max_level=VALUES(max_level), max_amount_per_sec=VALUES(max_amount_per_sec), base_exp_per_level=VALUES(base_exp_per_level), gained_exp=VALUES(gained_exp), shortening_min=VALUES(shortening_min)",
 		}, " ")
-		if _, err = tx.NamedExec(query, data); err != nil {
-			return errorResponse(c, http.StatusInternalServerError, err)
+		// if _, err = tx.NamedExec(query, data); err != nil {
+		// 	return errorResponse(c, http.StatusInternalServerError, err)
+		// }
+		for _, db := range h.getALLDB() {
+			if _, err = db.NamedExec(query, data); err != nil {
+				return errorResponse(c, http.StatusInternalServerError, err)
+			}
 		}
 	} else {
 		c.Logger().Debug("Skip Update Master: itemMaster")
@@ -560,7 +565,7 @@ func (h *Handler) adminUser(c echo.Context) error {
 
 	query = "SELECT * FROM user_items WHERE user_id=?"
 	items := make([]*UserItem, 0)
-	if err = h.DB.Select(&items, query, userID); err != nil {
+	if err = h.getDB(userID).Select(&items, query, userID); err != nil {
 		return errorResponse(c, http.StatusInternalServerError, err)
 	}
 
