@@ -14,7 +14,6 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -26,6 +25,7 @@ import (
 	"github.com/labstack/echo/v4/middleware"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/felixge/fgprof"
 )
@@ -696,30 +696,26 @@ func (h *Handler) obtainItem(tx *sqlx.Tx, userID, itemID int64, itemType int, ob
 // initialize 初期化処理
 // POST /initialize
 func initialize(c echo.Context) error {
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	var eg errgroup.Group
+	eg.Go(func() error {
 		req, err := http.NewRequest(
 			"POST",
 			fmt.Sprintf("http://%s/initializeDB", getEnv("ISUCON_DB_HOST2", "127.0.0.1")),
 			strings.NewReader(""),
 		)
 		if err != nil {
-			panic(err)
+			return err
 		}
 		client := &http.Client{}
 		resp, err := client.Do(req)
 		if err != nil {
-			panic(err)
+			return err
 		}
-		defer resp.Body.Close()
-	}()
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+		return resp.Body.Close()
+	})
+	eg.Go(func() error {
 		if getEnv("ISUCON_DB_HOST3", "127.0.0.1") == getEnv("ISUCON_DB_HOST2", "127.0.0.1") {
-			return
+			return nil
 		}
 
 		req, err := http.NewRequest(
@@ -728,22 +724,21 @@ func initialize(c echo.Context) error {
 			strings.NewReader(""),
 		)
 		if err != nil {
-			panic(err)
+			return err
 		}
 		client := &http.Client{}
 		resp, err := client.Do(req)
 		if err != nil {
-			panic(err)
+			return err
 		}
-		defer resp.Body.Close()
-	}()
-	wg.Add(1)
-	go func() {
+		return resp.Body.Close()
+	})
+	eg.Go(func() error {
 		if getEnv("ISUCON_DB_HOST4", "127.0.0.1") == getEnv("ISUCON_DB_HOST2", "127.0.0.1") {
-			return
+			return nil
 		}
 		if getEnv("ISUCON_DB_HOST4", "127.0.0.1") == getEnv("ISUCON_DB_HOST3", "127.0.0.1") {
-			return
+			return nil
 		}
 
 		req, err := http.NewRequest(
@@ -752,20 +747,19 @@ func initialize(c echo.Context) error {
 			strings.NewReader(""),
 		)
 		if err != nil {
-			panic(err)
+			return err
 		}
 		client := &http.Client{}
 		resp, err := client.Do(req)
 		if err != nil {
-			panic(err)
+			return err
 		}
-		defer resp.Body.Close()
-	}()
-
-	err := initializeDB(c)
-	wg.Wait()
-
-	return err
+		return resp.Body.Close()
+	})
+	eg.Go(func() error {
+		return initializeDB(c)
+	})
+	return eg.Wait()
 }
 
 // initialize 初期化処理
