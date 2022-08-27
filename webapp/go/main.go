@@ -2072,7 +2072,8 @@ func init() {
 	if serverIdStr == "" {
 		serverIdStr = "s1"
 	}
-	id, err := strconv.ParseInt(serverIdStr[1:], 10, 64)
+	id, _ := strconv.ParseInt(serverIdStr[1:], 10, 64)
+	var err error
 	node, err = snowflake.NewNode(id)
 	if err != nil {
 		panic(err)
