@@ -682,6 +682,11 @@ func initialize(c echo.Context) error {
 	}()
 	fin3 := make(chan struct{})
 	go func() {
+		if getEnv("ISUCON_DB_HOST3", "127.0.0.1") == getEnv("ISUCON_DB_HOST2", "127.0.0.1") {
+			close(fin3)
+			return
+		}
+
 		req, err := http.NewRequest(
 			"POST",
 			fmt.Sprintf("http://%s/initialize", getEnv("ISUCON_DB_HOST3", "127.0.0.1")),
