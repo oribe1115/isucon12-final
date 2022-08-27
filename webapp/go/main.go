@@ -638,7 +638,90 @@ func obtainCards(tx *sqlx.Tx, userID int64, obtainItemData []*ObtainItemDatum) (
 	return nil, nil
 }
 
-func obtainOthers(tx *sqlx.Tx, userID int64, obtainItemData []*ObtainItemDatum) ([]*UserItem, error) {
+func obtainOthers(tx *sqlx.Tx, userID int64, obtainItemDataOrig []*ObtainItemDatum) ([]*UserItem, error) {
+
+	//重複削除
+	obtainItemData := map[int64]*ObtainItemDatum{}
+	for _, v := range obtainItemData {
+		tmp, ok := obtainItemData[v.ItemID]
+		if ok && tmp.ItemType != v.ItemType {
+			obtainItemData[v.ItemID].ObtainAmount += v.ObtainAmount
+			return nil, ErrItemNotFound
+		} else {
+			obtainItemData[v.ItemID] = v
+		}
+	}
+	//存在判定
+	itemIDsArray := make([]int64, 0, len(obtainItemData))
+	for key, _ := range obtainItemData {
+		itemIDsArray = append(itemIDsArray, key)
+	}
+	query := "SELECT id, item_type FROM item_masters WHERE id IN (?)"
+	query, params, err := sqlx.In(query, itemIDsArray)
+	if err != nil {
+		return nil, err
+	}
+	itemMasters := []*ItemMaster{}
+	if err := tx.Select(&itemMasters, query, params...); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, ErrItemNotFound
+		}
+		return nil, err
+	}
+	if len(itemMasters) != len(itemIDsArray) {
+		return nil, ErrItemNotFound
+	}
+	for _, master := range itemMasters {
+		if master.ItemType != obtainItemData[master.ID].ItemType {
+			return nil, ErrItemNotFound
+		}
+	}
+	// 所持数取得
+	query = "SELECT * FROM user_items WHERE user_id=? AND item_id IN (?)"
+	query, params, err = sqlx.In(query, userID, itemIDsArray)
+	if err != nil {
+		return nil, err
+	}
+	uitems := make([]*UserItem, 0, len(itemIDsArray))
+	if err := tx.Select(&uitems, query, params...); err != nil {
+		if err != sql.ErrNoRows {
+			return nil, err
+		}
+		uitems = []*UserItem{}
+	}
+	uitemDict := map[int64]*UserItem{}
+	for {
+
+	}
+
+	if uitem == nil { // 新規作成
+		uitemID, err := h.generateID()
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		uitem = &UserItem{
+			ID:        uitemID,
+			UserID:    userID,
+			ItemType:  item.ItemType,
+			ItemID:    item.ID,
+			Amount:    int(obtainAmount),
+			CreatedAt: requestAt,
+			UpdatedAt: requestAt,
+		}
+		query = "INSERT INTO user_items(id, user_id, item_id, item_type, amount, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
+		if _, err := tx.Exec(query, uitem.ID, userID, uitem.ItemID, uitem.ItemType, uitem.Amount, requestAt, requestAt); err != nil {
+			return nil, nil, nil, err
+		}
+
+	} else { // 更新
+		uitem.Amount += int(obtainAmount)
+		uitem.UpdatedAt = requestAt
+		query = "UPDATE user_items SET amount=?, updated_at=? WHERE id=?"
+		if _, err := tx.Exec(query, uitem.Amount, uitem.UpdatedAt, uitem.ID); err != nil {
+			return nil, nil, nil, err
+		}
+	}
+
 	return nil, nil
 }
 
