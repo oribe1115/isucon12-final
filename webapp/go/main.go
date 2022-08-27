@@ -777,8 +777,8 @@ func (h *Handler) obtainOthers(tx *sqlx.Tx, userID int64, obtainItemDataOrig []*
 		log.Printf("obtainCards: expected %d items, got %d items", len(itemIDsArray), len(itemMasters))
 		return nil, ErrItemNotFound
 	}
-	log.Printf("itemMasters: %v\n", pretty.Formatter(itemMasters))
-	log.Printf("obtainItemData: %v\n", pretty.Formatter(obtainItemData))
+	log.Printf("itemMasters: %# v\n", pretty.Formatter(itemMasters))
+	log.Printf("obtainItemData: %# v\n", pretty.Formatter(obtainItemData))
 	for _, master := range itemMasters {
 		if master.ItemType != obtainItemData[master.ID].ItemType {
 			log.Printf("obtainOthers: expected item type %d, got %d", obtainItemData[master.ID].ItemType, master.ItemType)
