@@ -723,7 +723,7 @@ func (h *Handler) obtainCards(tx *sqlx.Tx, userID int64, obtainItemData []*Obtai
 	return nil, nil
 }
 
-func obtainOthers(tx *sqlx.Tx, userID int64, obtainItemDataOrig []*ObtainItemDatum) ([]*UserItem, error) {
+func (h *Handler) obtainOthers(tx *sqlx.Tx, userID int64, obtainItemDataOrig []*ObtainItemDatum) ([]*UserItem, error) {
 
 	//重複削除
 	obtainItemData := map[int64]*ObtainItemDatum{}
@@ -775,36 +775,35 @@ func obtainOthers(tx *sqlx.Tx, userID int64, obtainItemDataOrig []*ObtainItemDat
 		uitems = []*UserItem{}
 	}
 	uitemDict := map[int64]*UserItem{}
-	for {
-
+	for _, uitem := range uitems {
+		uitemDict[uitem.ItemID] = uitem
 	}
 
-	if uitem == nil { // 新規作成
-		uitemID, err := h.generateID()
-		if err != nil {
-			return nil, nil, nil, err
+	//更新
+	for _, addItem := range obtainItemData {
+		_, find := uitemDict[addItem.ItemID]
+		if find {
+			uitemDict[addItem.ItemID].Amount += int(addItem.ObtainAmount)
+		} else {
+			uitemID, err := h.generateID()
+			if err != nil {
+				return nil, err
+			}
+			uitems = append(uitems, &UserItem{
+				ID:        uitemID,
+				UserID:    userID,
+				ItemType:  addItem.ItemType,
+				ItemID:    addItem.ItemID,
+				Amount:    int(addItem.ObtainAmount),
+				CreatedAt: addItem.RequestAt,
+				UpdatedAt: addItem.RequestAt,
+			})
 		}
-		uitem = &UserItem{
-			ID:        uitemID,
-			UserID:    userID,
-			ItemType:  item.ItemType,
-			ItemID:    item.ID,
-			Amount:    int(obtainAmount),
-			CreatedAt: requestAt,
-			UpdatedAt: requestAt,
-		}
-		query = "INSERT INTO user_items(id, user_id, item_id, item_type, amount, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
-		if _, err := tx.Exec(query, uitem.ID, userID, uitem.ItemID, uitem.ItemType, uitem.Amount, requestAt, requestAt); err != nil {
-			return nil, nil, nil, err
-		}
-
-	} else { // 更新
-		uitem.Amount += int(obtainAmount)
-		uitem.UpdatedAt = requestAt
-		query = "UPDATE user_items SET amount=?, updated_at=? WHERE id=?"
-		if _, err := tx.Exec(query, uitem.Amount, uitem.UpdatedAt, uitem.ID); err != nil {
-			return nil, nil, nil, err
-		}
+	}
+	query = "INSERT INTO user_items(id, user_id, item_id, item_type, amount, created_at, updated_at) VALUES (:id, :user_id, :item_id, :item_type, :amount, :created_at, :supdated_at)" +
+		"ON DUPLICATE KEY UPDATE amount = VALUES(amount)"
+	if _, err := tx.NamedExec(query, uitems); err != nil {
+		return nil, err
 	}
 
 	return nil, nil
