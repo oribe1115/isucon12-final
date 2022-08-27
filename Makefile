@@ -127,22 +127,27 @@ endif
 
 .PHONY: set-as-s1
 set-as-s1:
+	echo "" >> $(ENV_FILE)
 	echo "SERVER_ID=s1" >> $(ENV_FILE)
 
 .PHONY: set-as-s2
 set-as-s2:
+	echo "" >> $(ENV_FILE)
 	echo "SERVER_ID=s2" >> $(ENV_FILE)
 
 .PHONY: set-as-s3
 set-as-s3:
+	echo "" >> $(ENV_FILE)
 	echo "SERVER_ID=s3" >> $(ENV_FILE)
 
 .PHONY: set-as-s4
 set-as-s4:
+	echo "" >> $(ENV_FILE)
 	echo "SERVER_ID=s4" >> $(ENV_FILE)
 
 .PHONY: set-as-s5
 set-as-s5:
+	echo "" >> $(ENV_FILE)
 	echo "SERVER_ID=s5" >> $(ENV_FILE)
 
 .PHONY: get-db-conf
