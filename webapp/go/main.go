@@ -727,7 +727,7 @@ func (h *Handler) obtainOthers(tx *sqlx.Tx, userID int64, obtainItemDataOrig []*
 
 	//重複削除
 	obtainItemData := map[int64]*ObtainItemDatum{}
-	for _, v := range obtainItemData {
+	for _, v := range obtainItemDataOrig {
 		tmp, ok := obtainItemData[v.ItemID]
 		if ok && tmp.ItemType != v.ItemType {
 			obtainItemData[v.ItemID].ObtainAmount += v.ObtainAmount
