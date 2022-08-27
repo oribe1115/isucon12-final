@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -695,8 +696,10 @@ func (h *Handler) obtainItem(tx *sqlx.Tx, userID, itemID int64, itemType int, ob
 // initialize 初期化処理
 // POST /initialize
 func initialize(c echo.Context) error {
-	fin2 := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		req, err := http.NewRequest(
 			"POST",
 			fmt.Sprintf("http://%s/initializeDB", getEnv("ISUCON_DB_HOST2", "127.0.0.1")),
@@ -711,13 +714,11 @@ func initialize(c echo.Context) error {
 			panic(err)
 		}
 		defer resp.Body.Close()
-
-		close(fin2)
 	}()
-	fin3 := make(chan struct{})
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		if getEnv("ISUCON_DB_HOST3", "127.0.0.1") == getEnv("ISUCON_DB_HOST2", "127.0.0.1") {
-			close(fin3)
 			return
 		}
 
@@ -735,17 +736,13 @@ func initialize(c echo.Context) error {
 			panic(err)
 		}
 		defer resp.Body.Close()
-
-		close(fin3)
 	}()
-	fin4 := make(chan struct{})
+	wg.Add(1)
 	go func() {
 		if getEnv("ISUCON_DB_HOST4", "127.0.0.1") == getEnv("ISUCON_DB_HOST2", "127.0.0.1") {
-			close(fin4)
 			return
 		}
 		if getEnv("ISUCON_DB_HOST4", "127.0.0.1") == getEnv("ISUCON_DB_HOST3", "127.0.0.1") {
-			close(fin4)
 			return
 		}
 
@@ -763,15 +760,10 @@ func initialize(c echo.Context) error {
 			panic(err)
 		}
 		defer resp.Body.Close()
-
-		close(fin4)
 	}()
 
 	err := initializeDB(c)
-
-	<-fin2
-	<-fin3
-	<-fin4
+	wg.Wait()
 
 	return err
 }
