@@ -14,9 +14,9 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
-	"sync/atomic"
 	"time"
 
+	"github.com/bwmarrin/snowflake"
 	"github.com/cespare/xxhash"
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/google/uuid"
@@ -25,6 +25,7 @@ import (
 	"github.com/labstack/echo/v4/middleware"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/felixge/fgprof"
 )
@@ -54,9 +55,10 @@ const (
 )
 
 type Handler struct {
-	DB  *sqlx.DB
+	DB  *sqlx.DB // admin用DB兼任
 	DB2 *sqlx.DB
 	DB3 *sqlx.DB
+	DB4 *sqlx.DB
 }
 
 func userXXHash(userID int64) uint64 {
@@ -67,18 +69,24 @@ func userXXHash(userID int64) uint64 {
 	return x.Sum64()
 }
 
+func (h *Handler) getALLDB() []*sqlx.DB {
+	return []*sqlx.DB{h.DB, h.DB2, h.DB3, h.DB4}
+}
 func (h *Handler) getDB(userID int64) *sqlx.DB {
-	return []*sqlx.DB{h.DB2, h.DB3}[userXXHash(userID)%2]
+	return []*sqlx.DB{h.DB, h.DB2, h.DB3, h.DB4}[userXXHash(userID)%4]
 }
 func (h *Handler) getOtherDBs(userID int64) []*sqlx.DB {
-	val := userXXHash(userID) % 2
-	if val == 0 {
-		return []*sqlx.DB{h.DB3}
+	switch userXXHash(userID) % 4 {
+	case 0:
+		return []*sqlx.DB{h.DB2, h.DB3, h.DB4}
+	case 1:
+		return []*sqlx.DB{h.DB, h.DB3, h.DB4}
+	case 2:
+		return []*sqlx.DB{h.DB, h.DB2, h.DB4}
+	case 3:
+		return []*sqlx.DB{h.DB, h.DB2, h.DB3}
 	}
-	if val == 1 {
-		return []*sqlx.DB{h.DB2}
-	}
-	return []*sqlx.DB{h.DB2, h.DB3}
+	return h.getALLDB()
 }
 
 func main() {
@@ -93,7 +101,7 @@ func main() {
 	time.Local = time.FixedZone("Local", 9*60*60)
 
 	e := echo.New()
-	//e.Use(middleware.Logger())
+	// e.Use(middleware.Logger())
 	e.Use(middleware.Recover())
 	e.Use(middleware.CORSWithConfig(middleware.CORSConfig{
 		AllowOrigins: []string{"*"},
@@ -105,12 +113,29 @@ func main() {
 	dbx, err := connectDB(false, getEnv("ISUCON_DB_HOST", "127.0.0.1"))
 	dbx2, err2 := connectDB(false, getEnv("ISUCON_DB_HOST2", "127.0.0.1"))
 	dbx3, err3 := connectDB(false, getEnv("ISUCON_DB_HOST3", "127.0.0.1"))
+	dbx4, err3 := connectDB(false, getEnv("ISUCON_DB_HOST4", "127.0.0.1"))
 	if err != nil || err2 != nil || err3 != nil {
 		e.Logger.Fatalf("failed to connect to db: %v,  %v,  %v", err, err2, err3)
 	}
 	defer dbx.Close()
 	defer dbx2.Close()
 	defer dbx3.Close()
+	defer dbx4.Close()
+
+	dbx.SetMaxOpenConns(500)
+	dbx2.SetMaxOpenConns(500)
+	dbx3.SetMaxOpenConns(500)
+	dbx4.SetMaxOpenConns(500)
+
+	dbx.SetConnMaxLifetime(120 * time.Second)
+	dbx2.SetConnMaxLifetime(120 * time.Second)
+	dbx3.SetConnMaxLifetime(120 * time.Second)
+	dbx4.SetConnMaxLifetime(120 * time.Second)
+
+	dbx.SetMaxIdleConns(250)
+	dbx2.SetMaxIdleConns(250)
+	dbx3.SetMaxIdleConns(250)
+	dbx4.SetMaxIdleConns(250)
 
 	// setting server
 	e.Server.Addr = fmt.Sprintf(":%v", "8080")
@@ -118,6 +143,7 @@ func main() {
 		DB:  dbx,
 		DB2: dbx2,
 		DB3: dbx3,
+		DB4: dbx4,
 	}
 
 	// e.Use(middleware.CORS())
@@ -201,7 +227,7 @@ func (h *Handler) apiMiddleware(next echo.HandlerFunc) echo.HandlerFunc {
 		// マスタ確認
 		query := "SELECT * FROM version_masters WHERE status=1"
 		masterVersion := new(VersionMaster)
-		if err := h.DB.Get(masterVersion, query); err != nil {
+		if err := h.getDB(0 /* どこでもよい */).Get(masterVersion, query); err != nil {
 			if err == sql.ErrNoRows {
 				return errorResponse(c, http.StatusNotFound, fmt.Errorf("active master version is not found"))
 			}
@@ -289,10 +315,10 @@ func (h *Handler) checkSessionMiddleware(next echo.HandlerFunc) echo.HandlerFunc
 }
 
 // checkOneTimeToken
-func (h *Handler) checkOneTimeToken(token string, tokenType int, requestAt int64) error {
+func (h *Handler) checkOneTimeToken(userID int64, token string, tokenType int, requestAt int64) error {
 	tk := new(UserOneTimeToken)
 	query := "SELECT * FROM user_one_time_tokens WHERE token=? AND token_type=?"
-	if err := h.DB.Get(tk, query, token, tokenType); err != nil {
+	if err := h.getDB(userID).Get(tk, query, token, tokenType); err != nil {
 		if err == sql.ErrNoRows {
 			return ErrInvalidToken
 		}
@@ -301,7 +327,7 @@ func (h *Handler) checkOneTimeToken(token string, tokenType int, requestAt int64
 
 	if tk.ExpiredAt < requestAt {
 		query = "DELETE FROM user_one_time_tokens WHERE token=?"
-		if _, err := h.DB.Exec(query, token); err != nil {
+		if _, err := h.getDB(userID).Exec(query, token); err != nil {
 			return err
 		}
 		return ErrInvalidToken
@@ -309,7 +335,7 @@ func (h *Handler) checkOneTimeToken(token string, tokenType int, requestAt int64
 
 	// 使ったトークンを失効する
 	query = "DELETE FROM user_one_time_tokens WHERE token=?"
-	if _, err := h.DB.Exec(query, token); err != nil {
+	if _, err := h.getDB(userID).Exec(query, token); err != nil {
 		return err
 	}
 
@@ -320,7 +346,7 @@ func (h *Handler) checkOneTimeToken(token string, tokenType int, requestAt int64
 func (h *Handler) checkViewerID(userID int64, viewerID string) error {
 	query := "SELECT * FROM user_devices WHERE user_id=? AND platform_id=?"
 	device := new(UserDevice)
-	if err := h.DB.Get(device, query, userID, viewerID); err != nil {
+	if err := h.getDB(userID).Get(device, query, userID, viewerID); err != nil {
 		if err == sql.ErrNoRows {
 			return ErrUserDeviceNotFound
 		}
@@ -334,7 +360,7 @@ func (h *Handler) checkViewerID(userID int64, viewerID string) error {
 func (h *Handler) checkBan(userID int64) (bool, error) {
 	banUser := new(UserBan)
 	query := "SELECT * FROM user_bans WHERE user_id=?"
-	if err := h.DB.Get(banUser, query, userID); err != nil {
+	if err := h.getDB(userID).Get(banUser, query, userID); err != nil {
 		if err == sql.ErrNoRows {
 			return false, nil
 		}
@@ -717,30 +743,26 @@ func (h *Handler) obtainItem(tx *sqlx.Tx, userID, itemID int64, itemType int, ob
 // initialize 初期化処理
 // POST /initialize
 func initialize(c echo.Context) error {
-	fin2 := make(chan struct{})
-	go func() {
+	var eg errgroup.Group
+	eg.Go(func() error {
 		req, err := http.NewRequest(
 			"POST",
 			fmt.Sprintf("http://%s/initializeDB", getEnv("ISUCON_DB_HOST2", "127.0.0.1")),
 			strings.NewReader(""),
 		)
 		if err != nil {
-			panic(err)
+			return err
 		}
 		client := &http.Client{}
 		resp, err := client.Do(req)
 		if err != nil {
-			panic(err)
+			return err
 		}
-		defer resp.Body.Close()
-
-		close(fin2)
-	}()
-	fin3 := make(chan struct{})
-	go func() {
+		return resp.Body.Close()
+	})
+	eg.Go(func() error {
 		if getEnv("ISUCON_DB_HOST3", "127.0.0.1") == getEnv("ISUCON_DB_HOST2", "127.0.0.1") {
-			close(fin3)
-			return
+			return nil
 		}
 
 		req, err := http.NewRequest(
@@ -749,24 +771,42 @@ func initialize(c echo.Context) error {
 			strings.NewReader(""),
 		)
 		if err != nil {
-			panic(err)
+			return err
 		}
 		client := &http.Client{}
 		resp, err := client.Do(req)
 		if err != nil {
-			panic(err)
+			return err
 		}
-		defer resp.Body.Close()
+		return resp.Body.Close()
+	})
+	eg.Go(func() error {
+		if getEnv("ISUCON_DB_HOST4", "127.0.0.1") == getEnv("ISUCON_DB_HOST2", "127.0.0.1") {
+			return nil
+		}
+		if getEnv("ISUCON_DB_HOST4", "127.0.0.1") == getEnv("ISUCON_DB_HOST3", "127.0.0.1") {
+			return nil
+		}
 
-		close(fin3)
-	}()
-
-	err := initializeDB(c)
-
-	<-fin2
-	<-fin3
-
-	return err
+		req, err := http.NewRequest(
+			"POST",
+			fmt.Sprintf("http://%s/initializeDB", getEnv("ISUCON_DB_HOST4", "127.0.0.1")),
+			strings.NewReader(""),
+		)
+		if err != nil {
+			return err
+		}
+		client := &http.Client{}
+		resp, err := client.Do(req)
+		if err != nil {
+			return err
+		}
+		return resp.Body.Close()
+	})
+	eg.Go(func() error {
+		return initializeDB(c)
+	})
+	return eg.Wait()
 }
 
 // initialize 初期化処理
@@ -812,17 +852,18 @@ func (h *Handler) createUser(c echo.Context) error {
 		return errorResponse(c, http.StatusInternalServerError, ErrGetRequestTime)
 	}
 
-	tx, err := h.DB.Beginx()
+	uID, err := h.generateID()
+	if err != nil {
+		return errorResponse(c, http.StatusInternalServerError, err)
+	}
+
+	tx, err := h.getDB(uID).Beginx()
 	if err != nil {
 		return errorResponse(c, http.StatusInternalServerError, err)
 	}
 	defer tx.Rollback() //nolint:errcheck
 
 	// ユーザ作成
-	uID, err := h.generateID()
-	if err != nil {
-		return errorResponse(c, http.StatusInternalServerError, err)
-	}
 	user := &User{
 		ID:              uID,
 		IsuCoin:         0,
@@ -984,7 +1025,7 @@ func (h *Handler) login(c echo.Context) error {
 
 	user := new(User)
 	query := "SELECT * FROM users WHERE id=?"
-	if err := h.DB.Get(user, query, req.UserID); err != nil {
+	if err := h.getDB(req.UserID).Get(user, query, req.UserID); err != nil {
 		if err == sql.ErrNoRows {
 			return errorResponse(c, http.StatusNotFound, ErrUserNotFound)
 		}
@@ -1008,20 +1049,15 @@ func (h *Handler) login(c echo.Context) error {
 		return errorResponse(c, http.StatusInternalServerError, err)
 	}
 
-	tx, err := h.DB.Beginx()
+	tx, err := h.getDB(req.UserID).Beginx()
 	if err != nil {
 		return errorResponse(c, http.StatusInternalServerError, err)
 	}
 	defer tx.Rollback() //nolint:errcheck
-	txDB, err := h.getDB(req.UserID).Beginx()
-	if err != nil {
-		return errorResponse(c, http.StatusInternalServerError, err)
-	}
-	defer txDB.Rollback() //nolint:errcheck
 
 	// sessionを更新
 	query = "DELETE FROM user_sessions WHERE user_id=?"
-	if _, err = txDB.Exec(query, req.UserID); err != nil {
+	if _, err = tx.Exec(query, req.UserID); err != nil {
 		return errorResponse(c, http.StatusInternalServerError, err)
 	}
 	sID, err := h.generateID()
@@ -1041,7 +1077,7 @@ func (h *Handler) login(c echo.Context) error {
 		ExpiredAt: requestAt + 86400,
 	}
 	query = "INSERT INTO user_sessions(id, user_id, session_id, created_at, updated_at, expired_at) VALUES (?, ?, ?, ?, ?, ?)"
-	if _, err = txDB.Exec(query, sess.ID, sess.UserID, sess.SessionID, sess.CreatedAt, sess.UpdatedAt, sess.ExpiredAt); err != nil {
+	if _, err = tx.Exec(query, sess.ID, sess.UserID, sess.SessionID, sess.CreatedAt, sess.UpdatedAt, sess.ExpiredAt); err != nil {
 		return errorResponse(c, http.StatusInternalServerError, err)
 	}
 
@@ -1056,10 +1092,6 @@ func (h *Handler) login(c echo.Context) error {
 		}
 
 		err = tx.Commit()
-		if err != nil {
-			return errorResponse(c, http.StatusInternalServerError, err)
-		}
-		err = txDB.Commit()
 		if err != nil {
 			return errorResponse(c, http.StatusInternalServerError, err)
 		}
@@ -1084,10 +1116,6 @@ func (h *Handler) login(c echo.Context) error {
 	}
 
 	err = tx.Commit()
-	if err != nil {
-		return errorResponse(c, http.StatusInternalServerError, err)
-	}
-	err = txDB.Commit()
 	if err != nil {
 		return errorResponse(c, http.StatusInternalServerError, err)
 	}
@@ -1125,7 +1153,7 @@ func (h *Handler) listGacha(c echo.Context) error {
 
 	gachaMasterList := []*GachaMaster{}
 	query := "SELECT * FROM gacha_masters WHERE start_at <= ? AND end_at >= ? ORDER BY display_order ASC"
-	err = h.DB.Select(&gachaMasterList, query, requestAt, requestAt)
+	err = h.getDB(userID).Select(&gachaMasterList, query, requestAt, requestAt)
 	if err != nil {
 		return errorResponse(c, http.StatusInternalServerError, err)
 	}
@@ -1141,7 +1169,7 @@ func (h *Handler) listGacha(c echo.Context) error {
 	query = "SELECT * FROM gacha_item_masters WHERE gacha_id=? ORDER BY id ASC"
 	for _, v := range gachaMasterList {
 		var gachaItem []*GachaItemMaster
-		err = h.DB.Select(&gachaItem, query, v.ID)
+		err = h.getDB(userID).Select(&gachaItem, query, v.ID)
 		if err != nil {
 			return errorResponse(c, http.StatusInternalServerError, err)
 		}
@@ -1158,7 +1186,7 @@ func (h *Handler) listGacha(c echo.Context) error {
 
 	// genearte one time token
 	query = "DELETE FROM user_one_time_tokens WHERE user_id=?"
-	if _, err = h.DB.Exec(query, userID); err != nil {
+	if _, err = h.getDB(userID).Exec(query, userID); err != nil {
 		return errorResponse(c, http.StatusInternalServerError, err)
 	}
 	tID, err := h.generateID()
@@ -1179,7 +1207,7 @@ func (h *Handler) listGacha(c echo.Context) error {
 		ExpiredAt: requestAt + 600,
 	}
 	query = "INSERT INTO user_one_time_tokens(id, user_id, token, token_type, created_at, updated_at, expired_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
-	if _, err = h.DB.Exec(query, token.ID, token.UserID, token.Token, token.TokenType, token.CreatedAt, token.UpdatedAt, token.ExpiredAt); err != nil {
+	if _, err = h.getDB(userID).Exec(query, token.ID, token.UserID, token.Token, token.TokenType, token.CreatedAt, token.UpdatedAt, token.ExpiredAt); err != nil {
 		return errorResponse(c, http.StatusInternalServerError, err)
 	}
 
@@ -1231,7 +1259,7 @@ func (h *Handler) drawGacha(c echo.Context) error {
 		return errorResponse(c, http.StatusInternalServerError, ErrGetRequestTime)
 	}
 
-	if err = h.checkOneTimeToken(req.OneTimeToken, 1, requestAt); err != nil {
+	if err = h.checkOneTimeToken(userID, req.OneTimeToken, 1, requestAt); err != nil {
 		if err == ErrInvalidToken {
 			return errorResponse(c, http.StatusBadRequest, err)
 		}
@@ -1250,7 +1278,7 @@ func (h *Handler) drawGacha(c echo.Context) error {
 	// userのisuconが足りるか
 	user := new(User)
 	query := "SELECT * FROM users WHERE id=?"
-	if err := h.DB.Get(user, query, userID); err != nil {
+	if err := h.getDB(userID).Get(user, query, userID); err != nil {
 		if err == sql.ErrNoRows {
 			return errorResponse(c, http.StatusNotFound, ErrUserNotFound)
 		}
@@ -1263,7 +1291,7 @@ func (h *Handler) drawGacha(c echo.Context) error {
 	// gachaIDからガチャマスタの取得
 	query = "SELECT * FROM gacha_masters WHERE id=? AND start_at <= ? AND end_at >= ?"
 	gachaInfo := new(GachaMaster)
-	if err = h.DB.Get(gachaInfo, query, gachaID, requestAt, requestAt); err != nil {
+	if err = h.getDB(userID).Get(gachaInfo, query, gachaID, requestAt, requestAt); err != nil {
 		if sql.ErrNoRows == err {
 			return errorResponse(c, http.StatusNotFound, fmt.Errorf("not found gacha"))
 		}
@@ -1272,7 +1300,7 @@ func (h *Handler) drawGacha(c echo.Context) error {
 
 	// gachaItemMasterからアイテムリスト取得
 	gachaItemList := make([]*GachaItemMaster, 0)
-	err = h.DB.Select(&gachaItemList, "SELECT * FROM gacha_item_masters WHERE gacha_id=? ORDER BY id ASC", gachaID)
+	err = h.getDB(userID).Select(&gachaItemList, "SELECT * FROM gacha_item_masters WHERE gacha_id=? ORDER BY id ASC", gachaID)
 	if err != nil {
 		return errorResponse(c, http.StatusInternalServerError, err)
 	}
@@ -1282,7 +1310,7 @@ func (h *Handler) drawGacha(c echo.Context) error {
 
 	// weightの合計値を算出
 	var sum int64
-	err = h.DB.Get(&sum, "SELECT SUM(weight) FROM gacha_item_masters WHERE gacha_id=?", gachaID)
+	err = h.getDB(userID).Get(&sum, "SELECT SUM(weight) FROM gacha_item_masters WHERE gacha_id=?", gachaID)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return errorResponse(c, http.StatusNotFound, err)
@@ -1304,7 +1332,7 @@ func (h *Handler) drawGacha(c echo.Context) error {
 		}
 	}
 
-	tx, err := h.DB.Beginx()
+	tx, err := h.getDB(userID).Beginx()
 	if err != nil {
 		return errorResponse(c, http.StatusInternalServerError, err)
 	}
@@ -1458,16 +1486,11 @@ func (h *Handler) receivePresent(c echo.Context) error {
 		})
 	}
 
-	tx, err := h.DB.Beginx()
+	tx, err := h.getDB(userID).Beginx()
 	if err != nil {
 		return errorResponse(c, http.StatusInternalServerError, err)
 	}
 	defer tx.Rollback() //nolint:errcheck
-	txUID, err := h.getDB(userID).Beginx()
-	if err != nil {
-		return errorResponse(c, http.StatusInternalServerError, err)
-	}
-	defer txUID.Rollback() //nolint:errcheck
 	query = "UPDATE user_presents SET deleted_at=?, updated_at=? WHERE id IN (?)"
 	ids := make([]int64, 0, len(obtainPresent))
 	for _, v := range obtainPresent {
@@ -1477,7 +1500,7 @@ func (h *Handler) receivePresent(c echo.Context) error {
 	if err != nil {
 		return errorResponse(c, http.StatusBadRequest, err)
 	}
-	_, err = txUID.Exec(query, params...)
+	_, err = tx.Exec(query, params...)
 	if err != nil {
 		return errorResponse(c, http.StatusInternalServerError, err)
 	}
@@ -1504,10 +1527,6 @@ func (h *Handler) receivePresent(c echo.Context) error {
 		}
 	}
 	err = tx.Commit()
-	if err != nil {
-		return errorResponse(c, http.StatusInternalServerError, err)
-	}
-	err = txUID.Commit()
 	if err != nil {
 		return errorResponse(c, http.StatusInternalServerError, err)
 	}
@@ -1541,7 +1560,7 @@ func (h *Handler) listItem(c echo.Context) error {
 
 	user := new(User)
 	query := "SELECT * FROM users WHERE id=?"
-	if err = h.DB.Get(user, query, userID); err != nil {
+	if err = h.getDB(userID).Get(user, query, userID); err != nil {
 		if err == sql.ErrNoRows {
 			return errorResponse(c, http.StatusNotFound, ErrUserNotFound)
 		}
@@ -1550,19 +1569,19 @@ func (h *Handler) listItem(c echo.Context) error {
 
 	itemList := []*UserItem{}
 	query = "SELECT * FROM user_items WHERE user_id = ?"
-	if err = h.DB.Select(&itemList, query, userID); err != nil {
+	if err = h.getDB(userID).Select(&itemList, query, userID); err != nil {
 		return errorResponse(c, http.StatusInternalServerError, err)
 	}
 
 	cardList := make([]*UserCard, 0)
 	query = "SELECT * FROM user_cards WHERE user_id=?"
-	if err = h.DB.Select(&cardList, query, userID); err != nil {
+	if err = h.getDB(userID).Select(&cardList, query, userID); err != nil {
 		return errorResponse(c, http.StatusInternalServerError, err)
 	}
 
 	// genearte one time token
 	query = "DELETE FROM user_one_time_tokens WHERE user_id=?"
-	if _, err = h.DB.Exec(query, userID); err != nil {
+	if _, err = h.getDB(userID).Exec(query, userID); err != nil {
 		return errorResponse(c, http.StatusInternalServerError, err)
 	}
 	tID, err := h.generateID()
@@ -1583,7 +1602,7 @@ func (h *Handler) listItem(c echo.Context) error {
 		ExpiredAt: requestAt + 600,
 	}
 	query = "INSERT INTO user_one_time_tokens(id, user_id, token, token_type, created_at, updated_at, expired_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
-	if _, err = h.DB.Exec(query, token.ID, token.UserID, token.Token, token.TokenType, token.CreatedAt, token.UpdatedAt, token.ExpiredAt); err != nil {
+	if _, err = h.getDB(userID).Exec(query, token.ID, token.UserID, token.Token, token.TokenType, token.CreatedAt, token.UpdatedAt, token.ExpiredAt); err != nil {
 		return errorResponse(c, http.StatusInternalServerError, err)
 	}
 
@@ -1627,7 +1646,7 @@ func (h *Handler) addExpToCard(c echo.Context) error {
 		return errorResponse(c, http.StatusInternalServerError, ErrGetRequestTime)
 	}
 
-	if err = h.checkOneTimeToken(req.OneTimeToken, 2, requestAt); err != nil {
+	if err = h.checkOneTimeToken(userID, req.OneTimeToken, 2, requestAt); err != nil {
 		if err == ErrInvalidToken {
 			return errorResponse(c, http.StatusBadRequest, err)
 		}
@@ -1649,7 +1668,7 @@ func (h *Handler) addExpToCard(c echo.Context) error {
 	INNER JOIN item_masters as im ON uc.card_id = im.id
 	WHERE uc.id = ? AND uc.user_id=?
 	`
-	if err = h.DB.Get(card, query, cardID, userID); err != nil {
+	if err = h.getDB(userID).Get(card, query, cardID, userID); err != nil {
 		if err == sql.ErrNoRows {
 			return errorResponse(c, http.StatusNotFound, err)
 		}
@@ -1670,7 +1689,7 @@ func (h *Handler) addExpToCard(c echo.Context) error {
 	`
 	for _, v := range req.Items {
 		item := new(ConsumeUserItemData)
-		if err = h.DB.Get(item, query, v.ID, userID); err != nil {
+		if err = h.getDB(userID).Get(item, query, v.ID, userID); err != nil {
 			if err == sql.ErrNoRows {
 				return errorResponse(c, http.StatusNotFound, err)
 			}
@@ -1702,11 +1721,10 @@ func (h *Handler) addExpToCard(c echo.Context) error {
 		card.AmountPerSec += (card.MaxAmountPerSec - card.BaseAmountPerSec) / (card.MaxLevel - 1)
 	}
 
-	tx, err := h.DB.Beginx()
+	tx, err := h.getDB(userID).Beginx()
 	if err != nil {
 		return errorResponse(c, http.StatusInternalServerError, err)
 	}
-
 	defer tx.Rollback() //nolint:errcheck
 
 	// cardのlvと経験値の更新、itemの消費
@@ -1839,14 +1857,14 @@ func (h *Handler) updateDeck(c echo.Context) error {
 		return errorResponse(c, http.StatusBadRequest, err)
 	}
 	cards := make([]*UserCard, 0)
-	if err = h.DB.Select(&cards, query, params...); err != nil {
+	if err = h.getDB(userID).Select(&cards, query, params...); err != nil {
 		return errorResponse(c, http.StatusInternalServerError, err)
 	}
 	if len(cards) != DeckCardNumber {
 		return errorResponse(c, http.StatusBadRequest, fmt.Errorf("invalid card ids"))
 	}
 
-	tx, err := h.DB.Beginx()
+	tx, err := h.getDB(userID).Beginx()
 	if err != nil {
 		return errorResponse(c, http.StatusInternalServerError, err)
 	}
@@ -1926,7 +1944,7 @@ func (h *Handler) reward(c echo.Context) error {
 	// 最後に取得した報酬時刻取得
 	user := new(User)
 	query := "SELECT * FROM users WHERE id=?"
-	if err = h.DB.Get(user, query, userID); err != nil {
+	if err = h.getDB(userID).Get(user, query, userID); err != nil {
 		if err == sql.ErrNoRows {
 			return errorResponse(c, http.StatusNotFound, ErrUserNotFound)
 		}
@@ -1936,7 +1954,7 @@ func (h *Handler) reward(c echo.Context) error {
 	// 使っているデッキの取得
 	deck := new(UserDeck)
 	query = "SELECT * FROM user_decks WHERE user_id=? AND deleted_at IS NULL"
-	if err = h.DB.Get(deck, query, userID); err != nil {
+	if err = h.getDB(userID).Get(deck, query, userID); err != nil {
 		if err == sql.ErrNoRows {
 			return errorResponse(c, http.StatusNotFound, err)
 		}
@@ -1945,7 +1963,7 @@ func (h *Handler) reward(c echo.Context) error {
 
 	cards := make([]*UserCard, 0)
 	query = "SELECT * FROM user_cards WHERE id IN (?, ?, ?)"
-	if err = h.DB.Select(&cards, query, deck.CardID1, deck.CardID2, deck.CardID3); err != nil {
+	if err = h.getDB(userID).Select(&cards, query, deck.CardID1, deck.CardID2, deck.CardID3); err != nil {
 		return errorResponse(c, http.StatusInternalServerError, err)
 	}
 	if len(cards) != 3 {
@@ -1961,7 +1979,7 @@ func (h *Handler) reward(c echo.Context) error {
 	user.LastGetRewardAt = requestAt
 
 	query = "UPDATE users SET isu_coin=?, last_getreward_at=? WHERE id=?"
-	if _, err = h.DB.Exec(query, user.IsuCoin, user.LastGetRewardAt, user.ID); err != nil {
+	if _, err = h.getDB(userID).Exec(query, user.IsuCoin, user.LastGetRewardAt, user.ID); err != nil {
 		return errorResponse(c, http.StatusInternalServerError, err)
 	}
 
@@ -1994,7 +2012,7 @@ func (h *Handler) home(c echo.Context) error {
 	// 装備情報
 	deck := new(UserDeck)
 	query := "SELECT * FROM user_decks WHERE user_id=? AND deleted_at IS NULL"
-	if err = h.DB.Get(deck, query, userID); err != nil {
+	if err = h.getDB(userID).Get(deck, query, userID); err != nil {
 		if err != sql.ErrNoRows {
 			return errorResponse(c, http.StatusInternalServerError, err)
 		}
@@ -2009,7 +2027,7 @@ func (h *Handler) home(c echo.Context) error {
 		if err != nil {
 			return errorResponse(c, http.StatusInternalServerError, err)
 		}
-		if err = h.DB.Select(&cards, query, params...); err != nil {
+		if err = h.getDB(userID).Select(&cards, query, params...); err != nil {
 			return errorResponse(c, http.StatusInternalServerError, err)
 		}
 	}
@@ -2021,7 +2039,7 @@ func (h *Handler) home(c echo.Context) error {
 	// 経過時間
 	user := new(User)
 	query = "SELECT * FROM users WHERE id=?"
-	if err = h.DB.Get(user, query, userID); err != nil {
+	if err = h.getDB(userID).Get(user, query, userID); err != nil {
 		if err == sql.ErrNoRows {
 			return errorResponse(c, http.StatusNotFound, ErrUserNotFound)
 		}
@@ -2078,8 +2096,7 @@ func noContentResponse(c echo.Context, status int) error {
 }
 
 var (
-	serverId  int64
-	currentId = (100_000_000_001 / 8) + time.Now().Unix()
+	node *snowflake.Node
 )
 
 func init() {
@@ -2087,16 +2104,17 @@ func init() {
 	if serverIdStr == "" {
 		serverIdStr = "s1"
 	}
-	id, err := strconv.ParseInt(serverIdStr[1:], 10, 64)
-	if err == nil {
-		serverId = id
+	id, _ := strconv.ParseInt(serverIdStr[1:], 10, 64)
+	var err error
+	node, err = snowflake.NewNode(id)
+	if err != nil {
+		panic(err)
 	}
 }
 
 // generateID uniqueなIDを生成する
 func (h *Handler) generateID() (int64, error) {
-	next := atomic.AddInt64(&currentId, 1)
-	return (next << 3) | serverId, nil
+	return node.Generate().Int64(), nil
 }
 
 // generateSessionID

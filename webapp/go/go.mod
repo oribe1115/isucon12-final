@@ -3,6 +3,7 @@ module github.com/isucon/isucon12-final/webapp/go
 go 1.19
 
 require (
+	github.com/bwmarrin/snowflake v0.3.0
 	github.com/cespare/xxhash v1.1.0
 	github.com/felixge/fgprof v0.9.2
 	github.com/go-sql-driver/mysql v1.6.0
@@ -12,6 +13,7 @@ require (
 	github.com/pkg/errors v0.9.1
 	github.com/samber/lo v1.27.0
 	golang.org/x/crypto v0.0.0-20210817164053-32db794688a5
+	golang.org/x/sync v0.0.0-20220819030929-7fc1605a5dde
 )
 
 require (

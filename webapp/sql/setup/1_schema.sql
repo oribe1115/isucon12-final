@@ -185,7 +185,7 @@ CREATE TABLE `user_items` (
   `updated_at`bigint NOT NULL,
   `deleted_at` bigint default NULL,
   PRIMARY KEY (`id`),
-  INDEX userid_idx (`user_id`)
+  INDEX userid_idx (`user_id`, `item_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 
 CREATE TABLE `user_cards` (
@@ -235,8 +235,8 @@ CREATE TABLE `user_sessions` (
   `created_at` bigint NOT NULL,
   `updated_at` bigint NOT NULL,
   `expired_at` bigint NOT NULL,
-  PRIMARY KEY (`id`),
-  UNIQUE uniq_session_id (`user_id`, `session_id`)
+  PRIMARY KEY (`user_id`),
+  UNIQUE uniq_session_id (`session_id`, `user_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 
 /* 更新処理について利用するone time tokenの管理 */
