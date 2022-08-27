@@ -654,7 +654,8 @@ func (h *Handler) obtainItems(tx *sqlx.Tx, userID int64, obtainItemData []*Obtai
 	}
 
 	if len(otherRequests) != 0 {
-		others, err = h.obtainOthers(tx, userID, otherRequests)
+		// others, err = h.obtainOthers(tx, userID, otherRequests)
+		others, err = h.obtainOthersNPlus1(tx, userID, otherRequests)
 		if err != nil {
 			return nil, nil, nil, err
 		}
@@ -736,6 +737,17 @@ func (h *Handler) obtainCards(tx *sqlx.Tx, userID int64, obtainItemData []*Obtai
 	if _, err := tx.NamedExec(query, cards); err != nil {
 		return nil, err
 	}
+	return nil, nil
+}
+
+func (h *Handler) obtainOthersNPlus1(tx *sqlx.Tx, userID int64, obtainItemDataOrig []*ObtainItemDatum) ([]*UserItem, error) {
+	for _, datum := range obtainItemDataOrig {
+		_, _, _, err := h.obtainItem(tx, userID, datum.ItemID, datum.ItemType, datum.ObtainAmount, datum.RequestAt)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	return nil, nil
 }
 
