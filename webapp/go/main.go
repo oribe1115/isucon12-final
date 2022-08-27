@@ -738,11 +738,40 @@ func initialize(c echo.Context) error {
 
 		close(fin3)
 	}()
+	fin4 := make(chan struct{})
+	go func() {
+		if getEnv("ISUCON_DB_HOST4", "127.0.0.1") == getEnv("ISUCON_DB_HOST2", "127.0.0.1") {
+			close(fin4)
+			return
+		}
+		if getEnv("ISUCON_DB_HOST4", "127.0.0.1") == getEnv("ISUCON_DB_HOST3", "127.0.0.1") {
+			close(fin4)
+			return
+		}
+
+		req, err := http.NewRequest(
+			"POST",
+			fmt.Sprintf("http://%s/initializeDB", getEnv("ISUCON_DB_HOST4", "127.0.0.1")),
+			strings.NewReader(""),
+		)
+		if err != nil {
+			panic(err)
+		}
+		client := &http.Client{}
+		resp, err := client.Do(req)
+		if err != nil {
+			panic(err)
+		}
+		defer resp.Body.Close()
+
+		close(fin4)
+	}()
 
 	err := initializeDB(c)
 
 	<-fin2
 	<-fin3
+	<-fin4
 
 	return err
 }
