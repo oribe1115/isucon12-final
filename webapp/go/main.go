@@ -73,10 +73,10 @@ func (h *Handler) getDB(userID int64) *sqlx.DB {
 func (h *Handler) getOtherDBs(userID int64) []*sqlx.DB {
 	val := userXXHash(userID) % 2
 	if val == 0 {
-		return []*sqlx.DB{h.DB2}
+		return []*sqlx.DB{h.DB3}
 	}
 	if val == 1 {
-		return []*sqlx.DB{h.DB3}
+		return []*sqlx.DB{h.DB2}
 	}
 	return []*sqlx.DB{h.DB2, h.DB3}
 }
