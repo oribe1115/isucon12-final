@@ -560,7 +560,7 @@ func (h *Handler) adminUser(c echo.Context) error {
 
 	query = "SELECT * FROM user_items WHERE user_id=?"
 	items := make([]*UserItem, 0)
-	if err = h.DB.Select(&items, query, userID); err != nil {
+	if err = h.getDB(userID).Select(&items, query, userID); err != nil {
 		return errorResponse(c, http.StatusInternalServerError, err)
 	}
 

@@ -573,7 +573,7 @@ func (h *Handler) obtainPresent(tx *sqlx.Tx, userID int64, requestAt int64) ([]*
 }
 
 // obtainItem アイテム付与処理
-func (h *Handler) obtainItem(tx *sqlx.Tx, userID, itemID int64, itemType int, obtainAmount int64, requestAt int64) ([]int64, []*UserCard, []*UserItem, error) {
+func (h *Handler) obtainItem(tx *sqlx.Tx, txUID *sqlx.Tx, userID, itemID int64, itemType int, obtainAmount int64, requestAt int64) ([]int64, []*UserCard, []*UserItem, error) {
 	obtainCoins := make([]int64, 0)
 	obtainCards := make([]*UserCard, 0)
 	obtainItems := make([]*UserItem, 0)
@@ -638,7 +638,7 @@ func (h *Handler) obtainItem(tx *sqlx.Tx, userID, itemID int64, itemType int, ob
 		// 所持数取得
 		query = "SELECT * FROM user_items WHERE user_id=? AND item_id=?"
 		uitem := new(UserItem)
-		if err := tx.Get(uitem, query, userID, item.ID); err != nil {
+		if err := txUID.Get(uitem, query, userID, item.ID); err != nil {
 			if err != sql.ErrNoRows {
 				return nil, nil, nil, err
 			}
@@ -660,7 +660,7 @@ func (h *Handler) obtainItem(tx *sqlx.Tx, userID, itemID int64, itemType int, ob
 				UpdatedAt: requestAt,
 			}
 			query = "INSERT INTO user_items(id, user_id, item_id, item_type, amount, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
-			if _, err := tx.Exec(query, uitem.ID, userID, uitem.ItemID, uitem.ItemType, uitem.Amount, requestAt, requestAt); err != nil {
+			if _, err := txUID.Exec(query, uitem.ID, userID, uitem.ItemID, uitem.ItemType, uitem.Amount, requestAt, requestAt); err != nil {
 				return nil, nil, nil, err
 			}
 
@@ -668,7 +668,7 @@ func (h *Handler) obtainItem(tx *sqlx.Tx, userID, itemID int64, itemType int, ob
 			uitem.Amount += int(obtainAmount)
 			uitem.UpdatedAt = requestAt
 			query = "UPDATE user_items SET amount=?, updated_at=? WHERE id=?"
-			if _, err := tx.Exec(query, uitem.Amount, uitem.UpdatedAt, uitem.ID); err != nil {
+			if _, err := txUID.Exec(query, uitem.Amount, uitem.UpdatedAt, uitem.ID); err != nil {
 				return nil, nil, nil, err
 			}
 		}
@@ -1518,7 +1518,7 @@ func (h *Handler) listItem(c echo.Context) error {
 
 	itemList := []*UserItem{}
 	query = "SELECT * FROM user_items WHERE user_id = ?"
-	if err = h.DB.Select(&itemList, query, userID); err != nil {
+	if err = h.getDB(userID).Select(&itemList, query, userID); err != nil {
 		return errorResponse(c, http.StatusInternalServerError, err)
 	}
 
@@ -1638,7 +1638,7 @@ func (h *Handler) addExpToCard(c echo.Context) error {
 	`
 	for _, v := range req.Items {
 		item := new(ConsumeUserItemData)
-		if err = h.DB.Get(item, query, v.ID, userID); err != nil {
+		if err = h.getDB(userID).Get(item, query, v.ID, userID); err != nil {
 			if err == sql.ErrNoRows {
 				return errorResponse(c, http.StatusNotFound, err)
 			}
@@ -1674,8 +1674,12 @@ func (h *Handler) addExpToCard(c echo.Context) error {
 	if err != nil {
 		return errorResponse(c, http.StatusInternalServerError, err)
 	}
-
 	defer tx.Rollback() //nolint:errcheck
+	txUID, err := h.getDB(userID).Beginx()
+	if err != nil {
+		return errorResponse(c, http.StatusInternalServerError, err)
+	}
+	defer txUID.Rollback() //nolint:errcheck
 
 	// cardのlvと経験値の更新、itemの消費
 	query = "UPDATE user_cards SET amount_per_sec=?, level=?, total_exp=?, updated_at=? WHERE id=?"
@@ -1685,7 +1689,7 @@ func (h *Handler) addExpToCard(c echo.Context) error {
 
 	query = "UPDATE user_items SET amount=?, updated_at=? WHERE id=?"
 	for _, v := range items {
-		if _, err = tx.Exec(query, v.Amount-v.ConsumeAmount, requestAt, v.ID); err != nil {
+		if _, err = txUID.Exec(query, v.Amount-v.ConsumeAmount, requestAt, v.ID); err != nil {
 			return errorResponse(c, http.StatusInternalServerError, err)
 		}
 	}
@@ -1713,6 +1717,10 @@ func (h *Handler) addExpToCard(c echo.Context) error {
 	}
 
 	err = tx.Commit()
+	if err != nil {
+		return errorResponse(c, http.StatusInternalServerError, err)
+	}
+	err = txUID.Commit()
 	if err != nil {
 		return errorResponse(c, http.StatusInternalServerError, err)
 	}
