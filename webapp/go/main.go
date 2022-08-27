@@ -436,6 +436,7 @@ func (h *Handler) obtainLoginBonus(tx *sqlx.Tx, userID int64, requestAt int64) (
 	}
 
 	sendLoginBonuses := make([]*UserLoginBonus, 0)
+	obtainItemsRequest := make([]*ObtainItemDatum, 0)
 
 	for _, bonus := range loginBonuses {
 		initBonus := false
@@ -487,25 +488,38 @@ func (h *Handler) obtainLoginBonus(tx *sqlx.Tx, userID int64, requestAt int64) (
 			return nil, err
 		}
 
-		_, _, _, err := h.obtainItem(tx, userID, rewardItem.ItemID, rewardItem.ItemType, rewardItem.Amount, requestAt)
-		if err != nil {
-			return nil, err
+		datum := &ObtainItemDatum{
+			ItemID:       rewardItem.ID,
+			ItemType:     rewardItem.ItemType,
+			ObtainAmount: rewardItem.Amount,
+			RequestAt:    requestAt,
 		}
+		obtainItemsRequest = append(obtainItemsRequest, datum)
+
+		// _, _, _, err := h.obtainItem(tx, userID, rewardItem.ItemID, rewardItem.ItemType, rewardItem.Amount, requestAt)
+		// if err != nil {
+		// 	return nil, err
+		// }
 
 		// 進捗の保存
 		if initBonus {
 			query = "INSERT INTO user_login_bonuses(id, user_id, login_bonus_id, last_reward_sequence, loop_count, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
-			if _, err = tx.Exec(query, userBonus.ID, userBonus.UserID, userBonus.LoginBonusID, userBonus.LastRewardSequence, userBonus.LoopCount, userBonus.CreatedAt, userBonus.UpdatedAt); err != nil {
+			if _, err := tx.Exec(query, userBonus.ID, userBonus.UserID, userBonus.LoginBonusID, userBonus.LastRewardSequence, userBonus.LoopCount, userBonus.CreatedAt, userBonus.UpdatedAt); err != nil {
 				return nil, err
 			}
 		} else {
 			query = "UPDATE user_login_bonuses SET last_reward_sequence=?, loop_count=?, updated_at=? WHERE id=?"
-			if _, err = tx.Exec(query, userBonus.LastRewardSequence, userBonus.LoopCount, userBonus.UpdatedAt, userBonus.ID); err != nil {
+			if _, err := tx.Exec(query, userBonus.LastRewardSequence, userBonus.LoopCount, userBonus.UpdatedAt, userBonus.ID); err != nil {
 				return nil, err
 			}
 		}
 
 		sendLoginBonuses = append(sendLoginBonuses, userBonus)
+	}
+
+	_, _, _, err := h.obtainItems(tx, userID, obtainItemsRequest)
+	if err != nil {
+		return nil, err
 	}
 
 	return sendLoginBonuses, nil
@@ -1547,6 +1561,8 @@ func (h *Handler) receivePresent(c echo.Context) error {
 		return errorResponse(c, http.StatusInternalServerError, err)
 	}
 
+	obtainItemsRequest := make([]*ObtainItemDatum, 0)
+
 	// 配布処理
 	for i := range obtainPresent {
 		if obtainPresent[i].DeletedAt != nil {
@@ -1557,17 +1573,37 @@ func (h *Handler) receivePresent(c echo.Context) error {
 		obtainPresent[i].DeletedAt = &requestAt
 		v := obtainPresent[i]
 
-		_, _, _, err = h.obtainItem(tx, v.UserID, v.ItemID, v.ItemType, int64(v.Amount), requestAt)
-		if err != nil {
-			if err == ErrUserNotFound || err == ErrItemNotFound {
-				return errorResponse(c, http.StatusNotFound, err)
-			}
-			if err == ErrInvalidItemType {
-				return errorResponse(c, http.StatusBadRequest, err)
-			}
-			return errorResponse(c, http.StatusInternalServerError, err)
+		datum := &ObtainItemDatum{
+			ItemID:       v.ItemID,
+			ItemType:     v.ItemType,
+			ObtainAmount: int64(v.Amount),
+			RequestAt:    requestAt,
 		}
+		obtainItemsRequest = append(obtainItemsRequest, datum)
+
+		// _, _, _, err = h.obtainItem(tx, v.UserID, v.ItemID, v.ItemType, int64(v.Amount), requestAt)
+		// if err != nil {
+		// 	if err == ErrUserNotFound || err == ErrItemNotFound {
+		// 		return errorResponse(c, http.StatusNotFound, err)
+		// 	}
+		// 	if err == ErrInvalidItemType {
+		// 		return errorResponse(c, http.StatusBadRequest, err)
+		// 	}
+		// 	return errorResponse(c, http.StatusInternalServerError, err)
+		// }
 	}
+
+	_, _, _, err = h.obtainItems(tx, userID, obtainItemsRequest)
+	if err != nil {
+		if err == ErrUserNotFound || err == ErrItemNotFound {
+			return errorResponse(c, http.StatusNotFound, err)
+		}
+		if err == ErrInvalidItemType {
+			return errorResponse(c, http.StatusBadRequest, err)
+		}
+		return errorResponse(c, http.StatusInternalServerError, err)
+	}
+
 	err = tx.Commit()
 	if err != nil {
 		return errorResponse(c, http.StatusInternalServerError, err)
