@@ -611,6 +611,18 @@ func (h *Handler) obtainItems(tx *sqlx.Tx, userID int64, obtainItemData []*Obtai
 	otherRequests := make([]*ObtainItemDatum, 0)
 
 	// filter
+	for _, datum := range obtainItemData {
+		switch datum.ItemType {
+		case 1:
+			coinRequests = append(coinRequests, datum)
+		case 2:
+			cardRequests = append(cardRequests, datum)
+		case 3, 4:
+			otherRequests = append(otherRequests, datum)
+		default:
+			return nil, nil, nil, ErrInvalidItemType
+		}
+	}
 
 	coins, err := obtainCoins(tx, userID, coinRequests)
 	if err != nil {
