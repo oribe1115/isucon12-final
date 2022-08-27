@@ -14,9 +14,9 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
-	"sync/atomic"
 	"time"
 
+	"github.com/bwmarrin/snowflake"
 	"github.com/cespare/xxhash"
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/google/uuid"
@@ -2064,8 +2064,7 @@ func noContentResponse(c echo.Context, status int) error {
 }
 
 var (
-	serverId  int64
-	currentId = (100_000_000_001 / 8) + time.Now().Unix()
+	node *snowflake.Node
 )
 
 func init() {
@@ -2074,15 +2073,15 @@ func init() {
 		serverIdStr = "s1"
 	}
 	id, err := strconv.ParseInt(serverIdStr[1:], 10, 64)
-	if err == nil {
-		serverId = id
+	node, err = snowflake.NewNode(id)
+	if err != nil {
+		panic(err)
 	}
 }
 
 // generateID uniqueなIDを生成する
 func (h *Handler) generateID() (int64, error) {
-	next := atomic.AddInt64(&currentId, 1)
-	return (next << 3) | serverId, nil
+	return node.Generate().Int64(), nil
 }
 
 // generateSessionID
