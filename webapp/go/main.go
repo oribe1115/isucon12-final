@@ -57,6 +57,7 @@ type Handler struct {
 	DB  *sqlx.DB
 	DB2 *sqlx.DB
 	DB3 *sqlx.DB
+	DB4 *sqlx.DB
 }
 
 func userXXHash(userID int64) uint64 {
@@ -67,18 +68,24 @@ func userXXHash(userID int64) uint64 {
 	return x.Sum64()
 }
 
+func (h *Handler) getALLDB() []*sqlx.DB {
+	return []*sqlx.DB{h.DB, h.DB2, h.DB3, h.DB4}
+}
 func (h *Handler) getDB(userID int64) *sqlx.DB {
-	return []*sqlx.DB{h.DB2, h.DB3}[userXXHash(userID)%2]
+	return []*sqlx.DB{h.DB2, h.DB3, h.DB4}[userXXHash(userID)%3]
 }
 func (h *Handler) getOtherDBs(userID int64) []*sqlx.DB {
-	val := userXXHash(userID) % 2
+	val := userXXHash(userID) % 3
 	if val == 0 {
-		return []*sqlx.DB{h.DB3}
+		return []*sqlx.DB{h.DB3, h.DB4}
 	}
 	if val == 1 {
-		return []*sqlx.DB{h.DB2}
+		return []*sqlx.DB{h.DB2, h.DB4}
 	}
-	return []*sqlx.DB{h.DB2, h.DB3}
+	if val == 2 {
+		return []*sqlx.DB{h.DB2, h.DB3}
+	}
+	return h.getALLDB()
 }
 
 func main() {
@@ -105,12 +112,14 @@ func main() {
 	dbx, err := connectDB(false, getEnv("ISUCON_DB_HOST", "127.0.0.1"))
 	dbx2, err2 := connectDB(false, getEnv("ISUCON_DB_HOST2", "127.0.0.1"))
 	dbx3, err3 := connectDB(false, getEnv("ISUCON_DB_HOST3", "127.0.0.1"))
+	dbx4, err3 := connectDB(false, getEnv("ISUCON_DB_HOST4", "127.0.0.1"))
 	if err != nil || err2 != nil || err3 != nil {
 		e.Logger.Fatalf("failed to connect to db: %v,  %v,  %v", err, err2, err3)
 	}
 	defer dbx.Close()
 	defer dbx2.Close()
 	defer dbx3.Close()
+	defer dbx4.Close()
 
 	// setting server
 	e.Server.Addr = fmt.Sprintf(":%v", "8080")
@@ -118,6 +127,7 @@ func main() {
 		DB:  dbx,
 		DB2: dbx2,
 		DB3: dbx3,
+		DB4: dbx4,
 	}
 
 	// e.Use(middleware.CORS())
@@ -353,7 +363,7 @@ func getRequestTime(c echo.Context) (int64, error) {
 }
 
 // loginProcess ログイン処理
-func (h *Handler) loginProcess(tx *sqlx.Tx, userID int64, requestAt int64) (*User, []*UserLoginBonus, []*UserPresent, error) {
+func (h *Handler) loginProcess(tx *sqlx.Tx, txUID *sqlx.Tx, userID int64, requestAt int64) (*User, []*UserLoginBonus, []*UserPresent, error) {
 	user := new(User)
 	query := "SELECT * FROM users WHERE id=?"
 	if err := tx.Get(user, query, userID); err != nil {
@@ -364,7 +374,7 @@ func (h *Handler) loginProcess(tx *sqlx.Tx, userID int64, requestAt int64) (*Use
 	}
 
 	// ログインボーナス処理
-	loginBonuses, err := h.obtainLoginBonus(tx, userID, requestAt)
+	loginBonuses, err := h.obtainLoginBonus(tx, txUID, userID, requestAt)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -401,7 +411,7 @@ func isCompleteTodayLogin(lastActivatedAt, requestAt time.Time) bool {
 }
 
 // obtainLoginBonus
-func (h *Handler) obtainLoginBonus(tx *sqlx.Tx, userID int64, requestAt int64) ([]*UserLoginBonus, error) {
+func (h *Handler) obtainLoginBonus(tx *sqlx.Tx, txUID *sqlx.Tx, userID int64, requestAt int64) ([]*UserLoginBonus, error) {
 	// login bonus masterから有効なログインボーナスを取得
 	loginBonuses := make([]*LoginBonusMaster, 0)
 	query := "SELECT * FROM login_bonus_masters WHERE start_at <= ? AND end_at >= ?"
@@ -461,7 +471,7 @@ func (h *Handler) obtainLoginBonus(tx *sqlx.Tx, userID int64, requestAt int64) (
 			return nil, err
 		}
 
-		_, _, _, err := h.obtainItem(tx, userID, rewardItem.ItemID, rewardItem.ItemType, rewardItem.Amount, requestAt)
+		_, _, _, err := h.obtainItem(tx, txUID, userID, rewardItem.ItemID, rewardItem.ItemType, rewardItem.Amount, requestAt)
 		if err != nil {
 			return nil, err
 		}
@@ -573,7 +583,7 @@ func (h *Handler) obtainPresent(tx *sqlx.Tx, userID int64, requestAt int64) ([]*
 }
 
 // obtainItem アイテム付与処理
-func (h *Handler) obtainItem(tx *sqlx.Tx, userID, itemID int64, itemType int, obtainAmount int64, requestAt int64) ([]int64, []*UserCard, []*UserItem, error) {
+func (h *Handler) obtainItem(tx *sqlx.Tx, txUID *sqlx.Tx, userID, itemID int64, itemType int, obtainAmount int64, requestAt int64) ([]int64, []*UserCard, []*UserItem, error) {
 	obtainCoins := make([]int64, 0)
 	obtainCards := make([]*UserCard, 0)
 	obtainItems := make([]*UserItem, 0)
@@ -638,7 +648,7 @@ func (h *Handler) obtainItem(tx *sqlx.Tx, userID, itemID int64, itemType int, ob
 		// 所持数取得
 		query = "SELECT * FROM user_items WHERE user_id=? AND item_id=?"
 		uitem := new(UserItem)
-		if err := tx.Get(uitem, query, userID, item.ID); err != nil {
+		if err := txUID.Get(uitem, query, userID, item.ID); err != nil {
 			if err != sql.ErrNoRows {
 				return nil, nil, nil, err
 			}
@@ -660,7 +670,7 @@ func (h *Handler) obtainItem(tx *sqlx.Tx, userID, itemID int64, itemType int, ob
 				UpdatedAt: requestAt,
 			}
 			query = "INSERT INTO user_items(id, user_id, item_id, item_type, amount, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
-			if _, err := tx.Exec(query, uitem.ID, userID, uitem.ItemID, uitem.ItemType, uitem.Amount, requestAt, requestAt); err != nil {
+			if _, err := txUID.Exec(query, uitem.ID, userID, uitem.ItemID, uitem.ItemType, uitem.Amount, requestAt, requestAt); err != nil {
 				return nil, nil, nil, err
 			}
 
@@ -668,7 +678,7 @@ func (h *Handler) obtainItem(tx *sqlx.Tx, userID, itemID int64, itemType int, ob
 			uitem.Amount += int(obtainAmount)
 			uitem.UpdatedAt = requestAt
 			query = "UPDATE user_items SET amount=?, updated_at=? WHERE id=?"
-			if _, err := tx.Exec(query, uitem.Amount, uitem.UpdatedAt, uitem.ID); err != nil {
+			if _, err := txUID.Exec(query, uitem.Amount, uitem.UpdatedAt, uitem.ID); err != nil {
 				return nil, nil, nil, err
 			}
 		}
@@ -728,11 +738,40 @@ func initialize(c echo.Context) error {
 
 		close(fin3)
 	}()
+	fin4 := make(chan struct{})
+	go func() {
+		if getEnv("ISUCON_DB_HOST4", "127.0.0.1") == getEnv("ISUCON_DB_HOST2", "127.0.0.1") {
+			close(fin4)
+			return
+		}
+		if getEnv("ISUCON_DB_HOST4", "127.0.0.1") == getEnv("ISUCON_DB_HOST3", "127.0.0.1") {
+			close(fin4)
+			return
+		}
+
+		req, err := http.NewRequest(
+			"POST",
+			fmt.Sprintf("http://%s/initializeDB", getEnv("ISUCON_DB_HOST4", "127.0.0.1")),
+			strings.NewReader(""),
+		)
+		if err != nil {
+			panic(err)
+		}
+		client := &http.Client{}
+		resp, err := client.Do(req)
+		if err != nil {
+			panic(err)
+		}
+		defer resp.Body.Close()
+
+		close(fin4)
+	}()
 
 	err := initializeDB(c)
 
 	<-fin2
 	<-fin3
+	<-fin4
 
 	return err
 }
@@ -875,7 +914,12 @@ func (h *Handler) createUser(c echo.Context) error {
 	}
 
 	// ログイン処理
-	user, loginBonuses, presents, err := h.loginProcess(tx, user.ID, requestAt)
+	txUID, err := h.getDB(user.ID).Beginx()
+	if err != nil {
+		return errorResponse(c, http.StatusInternalServerError, err)
+	}
+	defer txUID.Rollback() //nolint:errcheck
+	user, loginBonuses, presents, err := h.loginProcess(tx, txUID, user.ID, requestAt)
 	if err != nil {
 		if err == ErrUserNotFound || err == ErrItemNotFound || err == ErrLoginBonusRewardNotFound {
 			return errorResponse(c, http.StatusNotFound, err)
@@ -910,6 +954,10 @@ func (h *Handler) createUser(c echo.Context) error {
 	}
 
 	err = tx.Commit()
+	if err != nil {
+		return errorResponse(c, http.StatusInternalServerError, err)
+	}
+	err = txUID.Commit()
 	if err != nil {
 		return errorResponse(c, http.StatusInternalServerError, err)
 	}
@@ -1040,7 +1088,7 @@ func (h *Handler) login(c echo.Context) error {
 	}
 
 	// login process
-	user, loginBonuses, presents, err := h.loginProcess(tx, req.UserID, requestAt)
+	user, loginBonuses, presents, err := h.loginProcess(tx, txDB, req.UserID, requestAt)
 	if err != nil {
 		if err == ErrUserNotFound || err == ErrItemNotFound || err == ErrLoginBonusRewardNotFound {
 			return errorResponse(c, http.StatusNotFound, err)
@@ -1460,7 +1508,7 @@ func (h *Handler) receivePresent(c echo.Context) error {
 		obtainPresent[i].DeletedAt = &requestAt
 		v := obtainPresent[i]
 
-		_, _, _, err = h.obtainItem(tx, v.UserID, v.ItemID, v.ItemType, int64(v.Amount), requestAt)
+		_, _, _, err = h.obtainItem(tx, txUID, v.UserID, v.ItemID, v.ItemType, int64(v.Amount), requestAt)
 		if err != nil {
 			if err == ErrUserNotFound || err == ErrItemNotFound {
 				return errorResponse(c, http.StatusNotFound, err)
@@ -1518,7 +1566,7 @@ func (h *Handler) listItem(c echo.Context) error {
 
 	itemList := []*UserItem{}
 	query = "SELECT * FROM user_items WHERE user_id = ?"
-	if err = h.DB.Select(&itemList, query, userID); err != nil {
+	if err = h.getDB(userID).Select(&itemList, query, userID); err != nil {
 		return errorResponse(c, http.StatusInternalServerError, err)
 	}
 
@@ -1638,7 +1686,7 @@ func (h *Handler) addExpToCard(c echo.Context) error {
 	`
 	for _, v := range req.Items {
 		item := new(ConsumeUserItemData)
-		if err = h.DB.Get(item, query, v.ID, userID); err != nil {
+		if err = h.getDB(userID).Get(item, query, v.ID, userID); err != nil {
 			if err == sql.ErrNoRows {
 				return errorResponse(c, http.StatusNotFound, err)
 			}
@@ -1674,8 +1722,12 @@ func (h *Handler) addExpToCard(c echo.Context) error {
 	if err != nil {
 		return errorResponse(c, http.StatusInternalServerError, err)
 	}
-
 	defer tx.Rollback() //nolint:errcheck
+	txUID, err := h.getDB(userID).Beginx()
+	if err != nil {
+		return errorResponse(c, http.StatusInternalServerError, err)
+	}
+	defer txUID.Rollback() //nolint:errcheck
 
 	// cardのlvと経験値の更新、itemの消費
 	query = "UPDATE user_cards SET amount_per_sec=?, level=?, total_exp=?, updated_at=? WHERE id=?"
@@ -1685,7 +1737,7 @@ func (h *Handler) addExpToCard(c echo.Context) error {
 
 	query = "UPDATE user_items SET amount=?, updated_at=? WHERE id=?"
 	for _, v := range items {
-		if _, err = tx.Exec(query, v.Amount-v.ConsumeAmount, requestAt, v.ID); err != nil {
+		if _, err = txUID.Exec(query, v.Amount-v.ConsumeAmount, requestAt, v.ID); err != nil {
 			return errorResponse(c, http.StatusInternalServerError, err)
 		}
 	}
@@ -1713,6 +1765,10 @@ func (h *Handler) addExpToCard(c echo.Context) error {
 	}
 
 	err = tx.Commit()
+	if err != nil {
+		return errorResponse(c, http.StatusInternalServerError, err)
+	}
+	err = txUID.Commit()
 	if err != nil {
 		return errorResponse(c, http.StatusInternalServerError, err)
 	}
