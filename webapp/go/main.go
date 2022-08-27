@@ -453,17 +453,19 @@ func (h *Handler) obtainPresent(tx *sqlx.Tx, userID int64, requestAt int64) ([]*
 	// 全員プレゼント取得情報更新
 	presentIDs := lo.Map(normalPresents, func(np *PresentAllMaster, _ int) int64 { return np.ID })
 	query = "SELECT * FROM user_present_all_received_history WHERE user_id=? AND present_all_id IN (?)"
-	query, params, err := sqlx.In(query, userID, presentIDs)
-	if err != nil {
-		return nil, err
-	}
 	received := make([]*UserPresentAllReceivedHistory, 0)
-	if err := tx.Select(&received, query, params...); err != nil {
-		return nil, err
-	}
 	receivedPresents := make(map[int64]struct{}, len(received))
-	for _, history := range received {
-		receivedPresents[history.PresentAllID] = struct{}{}
+	if len(presentIDs) > 0 {
+		query, params, err := sqlx.In(query, userID, presentIDs)
+		if err != nil {
+			return nil, err
+		}
+		if err := tx.Select(&received, query, params...); err != nil {
+			return nil, err
+		}
+		for _, history := range received {
+			receivedPresents[history.PresentAllID] = struct{}{}
+		}
 	}
 
 	obtainPresents := make([]*UserPresent, 0, len(normalPresents)-len(receivedPresents))
