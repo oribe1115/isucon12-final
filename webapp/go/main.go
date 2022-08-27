@@ -457,7 +457,7 @@ func (h *Handler) obtainPresent(tx *sqlx.Tx, userID int64, requestAt int64) ([]*
 	if err != nil {
 		return nil, err
 	}
-	var received []UserPresentAllReceivedHistory
+	var received []*UserPresentAllReceivedHistory
 	if err := tx.Select(&received, query, params...); err != nil {
 		return nil, err
 	}
