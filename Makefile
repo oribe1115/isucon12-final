@@ -137,6 +137,14 @@ set-as-s2:
 set-as-s3:
 	echo "SERVER_ID=s3" >> $(ENV_FILE)
 
+.PHONY: set-as-s4
+set-as-s4:
+	echo "SERVER_ID=s4" >> $(ENV_FILE)
+
+.PHONY: set-as-s5
+set-as-s5:
+	echo "SERVER_ID=s5" >> $(ENV_FILE)
+
 .PHONY: get-db-conf
 get-db-conf:
 	sudo cp -R $(DB_PATH)/* ~/$(SERVER_ID)/etc/mysql
