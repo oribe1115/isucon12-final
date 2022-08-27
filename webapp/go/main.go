@@ -22,6 +22,7 @@ import (
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
+	"github.com/kr/pretty"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 	"github.com/pkg/errors"
@@ -776,8 +777,8 @@ func (h *Handler) obtainOthers(tx *sqlx.Tx, userID int64, obtainItemDataOrig []*
 		log.Printf("obtainCards: expected %d items, got %d items", len(itemIDsArray), len(itemMasters))
 		return nil, ErrItemNotFound
 	}
-	log.Printf("itemMasters: %v\n", itemMasters)
-	log.Printf("obtainItemData: %v\n", obtainItemData)
+	log.Printf("itemMasters: %v\n", pretty.Formatter(itemMasters))
+	log.Printf("obtainItemData: %v\n", pretty.Formatter(obtainItemData))
 	for _, master := range itemMasters {
 		if master.ItemType != obtainItemData[master.ID].ItemType {
 			log.Printf("obtainOthers: expected item type %d, got %d", obtainItemData[master.ID].ItemType, master.ItemType)
