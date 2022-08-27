@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -51,7 +52,9 @@ const (
 )
 
 type Handler struct {
-	DB *sqlx.DB
+	DB  *sqlx.DB
+	DB2 *sqlx.DB
+	DB3 *sqlx.DB
 }
 
 func main() {
@@ -647,11 +650,53 @@ func initialize(c echo.Context) error {
 	}
 	defer dbx.Close()
 
+	fin2 := make(chan struct{})
+	go func() {
+		req, err := http.NewRequest(
+			"POST",
+			"http://133.152.6.66/initialize",
+			strings.NewReader(""),
+		)
+		if err != nil {
+			panic(err)
+		}
+		client := &http.Client{}
+		resp, err := client.Do(req)
+		if err != nil {
+			panic(err)
+		}
+		defer resp.Body.Close()
+
+		close(fin2)
+	}()
+	fin3 := make(chan struct{})
+	go func() {
+		req, err := http.NewRequest(
+			"POST",
+			"http://133.152.6.67/initialize",
+			strings.NewReader(""),
+		)
+		if err != nil {
+			panic(err)
+		}
+		client := &http.Client{}
+		resp, err := client.Do(req)
+		if err != nil {
+			panic(err)
+		}
+		defer resp.Body.Close()
+
+		close(fin3)
+	}()
+
 	out, err := exec.Command("/bin/sh", "-c", SQLDirectory+"init.sh").CombinedOutput()
 	if err != nil {
 		c.Logger().Errorf("Failed to initialize %s: %v", string(out), err)
 		return errorResponse(c, http.StatusInternalServerError, err)
 	}
+
+	<-fin2
+	<-fin3
 
 	return successResponse(c, &InitializeResponse{
 		Language: "go",
