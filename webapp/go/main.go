@@ -1924,7 +1924,7 @@ func noContentResponse(c echo.Context, status int) error {
 
 var (
 	serverId  int64
-	currentId int64 = 100000000001 / 8
+	currentId = time.Now().UnixNano() / 8
 )
 
 func init() {
