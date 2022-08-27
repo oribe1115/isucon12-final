@@ -79,3 +79,4 @@ max_binlog_size   = 100M
 
 skip-log-bin
 innodb_flush_log_at_trx_commit = 0
+
