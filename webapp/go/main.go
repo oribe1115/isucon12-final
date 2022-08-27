@@ -643,6 +643,24 @@ func (h *Handler) obtainItems(tx *sqlx.Tx, userID int64, obtainItemData []*Obtai
 }
 
 func obtainCoins(tx *sqlx.Tx, userID int64, obtainItemData []*ObtainItemDatum) ([]int64, error) {
+	user := new(User)
+	query := "SELECT * FROM users WHERE id=?"
+	if err := tx.Get(user, query, userID); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, ErrUserNotFound
+		}
+		return nil, err
+	}
+
+	query = "UPDATE users SET isu_coin=? WHERE id=?"
+	var obtainAmount int64
+	for _, d := range obtainItemData {
+		obtainAmount += d.ObtainAmount
+	}
+	totalCoin := user.IsuCoin + obtainAmount
+	if _, err := tx.Exec(query, totalCoin, user.ID); err != nil {
+		return nil, err
+	}
 	return nil, nil
 }
 
