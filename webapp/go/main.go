@@ -1975,7 +1975,7 @@ func noContentResponse(c echo.Context, status int) error {
 
 var (
 	serverId  int64
-	currentId = time.Now().UnixNano() / 8
+	currentId = (100_000_000_001 / 8) + time.Now().Unix()
 )
 
 func init() {
