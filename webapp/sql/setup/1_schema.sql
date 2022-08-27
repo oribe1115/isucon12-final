@@ -235,8 +235,8 @@ CREATE TABLE `user_sessions` (
   `created_at` bigint NOT NULL,
   `updated_at` bigint NOT NULL,
   `expired_at` bigint NOT NULL,
-  PRIMARY KEY (`id`),
-  UNIQUE uniq_session_id (`user_id`, `session_id`)
+  PRIMARY KEY (`user_id`),
+  UNIQUE uniq_session_id (`session_id`, `user_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 
 /* 更新処理について利用するone time tokenの管理 */

@@ -14,9 +14,9 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
-	"sync/atomic"
 	"time"
 
+	"github.com/bwmarrin/snowflake"
 	"github.com/cespare/xxhash"
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/google/uuid"
@@ -25,6 +25,7 @@ import (
 	"github.com/labstack/echo/v4/middleware"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/felixge/fgprof"
 )
@@ -710,30 +711,26 @@ func (h *Handler) obtainItem(tx *sqlx.Tx, userID, itemID int64, itemType int, ob
 // initialize 初期化処理
 // POST /initialize
 func initialize(c echo.Context) error {
-	fin2 := make(chan struct{})
-	go func() {
+	var eg errgroup.Group
+	eg.Go(func() error {
 		req, err := http.NewRequest(
 			"POST",
 			fmt.Sprintf("http://%s/initializeDB", getEnv("ISUCON_DB_HOST2", "127.0.0.1")),
 			strings.NewReader(""),
 		)
 		if err != nil {
-			panic(err)
+			return err
 		}
 		client := &http.Client{}
 		resp, err := client.Do(req)
 		if err != nil {
-			panic(err)
+			return err
 		}
-		defer resp.Body.Close()
-
-		close(fin2)
-	}()
-	fin3 := make(chan struct{})
-	go func() {
+		return resp.Body.Close()
+	})
+	eg.Go(func() error {
 		if getEnv("ISUCON_DB_HOST3", "127.0.0.1") == getEnv("ISUCON_DB_HOST2", "127.0.0.1") {
-			close(fin3)
-			return
+			return nil
 		}
 
 		req, err := http.NewRequest(
@@ -742,26 +739,21 @@ func initialize(c echo.Context) error {
 			strings.NewReader(""),
 		)
 		if err != nil {
-			panic(err)
+			return err
 		}
 		client := &http.Client{}
 		resp, err := client.Do(req)
 		if err != nil {
-			panic(err)
+			return err
 		}
-		defer resp.Body.Close()
-
-		close(fin3)
-	}()
-	fin4 := make(chan struct{})
-	go func() {
+		return resp.Body.Close()
+	})
+	eg.Go(func() error {
 		if getEnv("ISUCON_DB_HOST4", "127.0.0.1") == getEnv("ISUCON_DB_HOST2", "127.0.0.1") {
-			close(fin4)
-			return
+			return nil
 		}
 		if getEnv("ISUCON_DB_HOST4", "127.0.0.1") == getEnv("ISUCON_DB_HOST3", "127.0.0.1") {
-			close(fin4)
-			return
+			return nil
 		}
 
 		req, err := http.NewRequest(
@@ -770,25 +762,19 @@ func initialize(c echo.Context) error {
 			strings.NewReader(""),
 		)
 		if err != nil {
-			panic(err)
+			return err
 		}
 		client := &http.Client{}
 		resp, err := client.Do(req)
 		if err != nil {
-			panic(err)
+			return err
 		}
-		defer resp.Body.Close()
-
-		close(fin4)
-	}()
-
-	err := initializeDB(c)
-
-	<-fin2
-	<-fin3
-	<-fin4
-
-	return err
+		return resp.Body.Close()
+	})
+	eg.Go(func() error {
+		return initializeDB(c)
+	})
+	return eg.Wait()
 }
 
 // initialize 初期化処理
@@ -2078,8 +2064,7 @@ func noContentResponse(c echo.Context, status int) error {
 }
 
 var (
-	serverId  int64
-	currentId = (100_000_000_001 / 8) + time.Now().Unix()
+	node *snowflake.Node
 )
 
 func init() {
@@ -2087,16 +2072,17 @@ func init() {
 	if serverIdStr == "" {
 		serverIdStr = "s1"
 	}
-	id, err := strconv.ParseInt(serverIdStr[1:], 10, 64)
-	if err == nil {
-		serverId = id
+	id, _ := strconv.ParseInt(serverIdStr[1:], 10, 64)
+	var err error
+	node, err = snowflake.NewNode(id)
+	if err != nil {
+		panic(err)
 	}
 }
 
 // generateID uniqueなIDを生成する
 func (h *Handler) generateID() (int64, error) {
-	next := atomic.AddInt64(&currentId, 1)
-	return (next << 3) | serverId, nil
+	return node.Generate().Int64(), nil
 }
 
 // generateSessionID
