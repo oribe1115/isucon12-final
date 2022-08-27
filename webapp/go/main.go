@@ -261,7 +261,7 @@ func (h *Handler) checkSessionMiddleware(next echo.HandlerFunc) echo.HandlerFunc
 // checkOneTimeToken
 func (h *Handler) checkOneTimeToken(token string, tokenType int, requestAt int64) error {
 	tk := new(UserOneTimeToken)
-	query := "SELECT * FROM user_one_time_tokens WHERE token=? AND token_type=? AND deleted_at IS NULL"
+	query := "SELECT * FROM user_one_time_tokens WHERE token=? AND token_type=?"
 	if err := h.DB.Get(tk, query, token, tokenType); err != nil {
 		if err == sql.ErrNoRows {
 			return ErrInvalidToken
@@ -270,16 +270,16 @@ func (h *Handler) checkOneTimeToken(token string, tokenType int, requestAt int64
 	}
 
 	if tk.ExpiredAt < requestAt {
-		query = "UPDATE user_one_time_tokens SET deleted_at=? WHERE token=?"
-		if _, err := h.DB.Exec(query, requestAt, token); err != nil {
+		query = "DELETE FROM user_one_time_tokens WHERE token=?"
+		if _, err := h.DB.Exec(query, token); err != nil {
 			return err
 		}
 		return ErrInvalidToken
 	}
 
 	// 使ったトークンを失効する
-	query = "UPDATE user_one_time_tokens SET deleted_at=? WHERE token=?"
-	if _, err := h.DB.Exec(query, requestAt, token); err != nil {
+	query = "DELETE FROM user_one_time_tokens WHERE token=?"
+	if _, err := h.DB.Exec(query, token); err != nil {
 		return err
 	}
 
@@ -1068,8 +1068,8 @@ func (h *Handler) listGacha(c echo.Context) error {
 	}
 
 	// genearte one time token
-	query = "UPDATE user_one_time_tokens SET deleted_at=? WHERE user_id=? AND deleted_at IS NULL"
-	if _, err = h.DB.Exec(query, requestAt, userID); err != nil {
+	query = "DELETE FROM user_one_time_tokens WHERE user_id=?"
+	if _, err = h.DB.Exec(query, userID); err != nil {
 		return errorResponse(c, http.StatusInternalServerError, err)
 	}
 	tID, err := h.generateID()
@@ -1472,8 +1472,8 @@ func (h *Handler) listItem(c echo.Context) error {
 	}
 
 	// genearte one time token
-	query = "UPDATE user_one_time_tokens SET deleted_at=? WHERE user_id=? AND deleted_at IS NULL"
-	if _, err = h.DB.Exec(query, requestAt, userID); err != nil {
+	query = "DELETE FROM user_one_time_tokens WHERE user_id=?"
+	if _, err = h.DB.Exec(query, userID); err != nil {
 		return errorResponse(c, http.StatusInternalServerError, err)
 	}
 	tID, err := h.generateID()
@@ -2198,7 +2198,6 @@ type UserOneTimeToken struct {
 	ExpiredAt int64  `json:"expiredAt" db:"expired_at"`
 	CreatedAt int64  `json:"createdAt" db:"created_at"`
 	UpdatedAt int64  `json:"updatedAt" db:"updated_at"`
-	DeletedAt *int64 `json:"deletedAt,omitempty" db:"deleted_at"`
 }
 
 // //////////////////////////////////////
