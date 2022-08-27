@@ -648,7 +648,7 @@ func (h *Handler) obtainItems(tx *sqlx.Tx, userID int64, obtainItemData []*Obtai
 		return nil, nil, nil, err
 	}
 
-	others, err := obtainOthers(tx, userID, otherRequests)
+	others, err := h.obtainOthers(tx, userID, otherRequests)
 	if err != nil {
 		return nil, nil, nil, err
 	}
