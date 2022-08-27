@@ -694,6 +694,16 @@ func (h *Handler) obtainCards(tx *sqlx.Tx, userID int64, obtainItemData []*Obtai
 		return nil, ErrItemNotFound
 	}
 	itemsMaster := lo.SliceToMap(items, func(i *ItemMaster) (int64, *ItemMaster) { return i.ID, i })
+	// check item type
+	for _, d := range obtainItemData {
+		item, ok := itemsMaster[d.ItemID]
+		if !ok {
+			return nil, errors.New("item not found from master")
+		}
+		if item.ItemType != d.ItemType {
+			return nil, ErrItemNotFound
+		}
+	}
 
 	cards := make([]*UserCard, 0, len(obtainItemData))
 	for _, d := range obtainItemData {
@@ -701,10 +711,7 @@ func (h *Handler) obtainCards(tx *sqlx.Tx, userID int64, obtainItemData []*Obtai
 		if err != nil {
 			return nil, err
 		}
-		item, ok := itemsMaster[d.ItemID]
-		if !ok {
-			return nil, errors.New("item not found from master")
-		}
+		item := itemsMaster[d.ItemID]
 		cards = append(cards, &UserCard{
 			ID:           cID,
 			UserID:       userID,
@@ -725,7 +732,7 @@ func (h *Handler) obtainCards(tx *sqlx.Tx, userID int64, obtainItemData []*Obtai
 
 func (h *Handler) obtainOthers(tx *sqlx.Tx, userID int64, obtainItemDataOrig []*ObtainItemDatum) ([]*UserItem, error) {
 
-	//重複削除
+	// 重複削除
 	obtainItemData := map[int64]*ObtainItemDatum{}
 	for _, v := range obtainItemDataOrig {
 		tmp, ok := obtainItemData[v.ItemID]
@@ -738,7 +745,7 @@ func (h *Handler) obtainOthers(tx *sqlx.Tx, userID int64, obtainItemDataOrig []*
 			obtainItemData[v.ItemID] = v
 		}
 	}
-	//存在判定
+	// 存在判定
 	itemIDsArray := make([]int64, 0, len(obtainItemData))
 	for key, _ := range obtainItemData {
 		itemIDsArray = append(itemIDsArray, key)
@@ -781,7 +788,7 @@ func (h *Handler) obtainOthers(tx *sqlx.Tx, userID int64, obtainItemDataOrig []*
 		uitemDict[uitem.ItemID] = uitem
 	}
 
-	//更新
+	// 更新
 	for _, addItem := range obtainItemData {
 		_, find := uitemDict[addItem.ItemID]
 		if find {
