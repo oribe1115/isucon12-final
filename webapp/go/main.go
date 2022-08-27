@@ -70,6 +70,16 @@ func userXXHash(userID int64) uint64 {
 func (h *Handler) getDB(userID int64) *sqlx.DB {
 	return []*sqlx.DB{h.DB2, h.DB3}[userXXHash(userID)%2]
 }
+func (h *Handler) getOtherDBs(userID int64) []*sqlx.DB {
+	val := userXXHash(userID) % 2
+	if val == 0 {
+		return []*sqlx.DB{h.DB2}
+	}
+	if val == 1 {
+		return []*sqlx.DB{h.DB3}
+	}
+	return []*sqlx.DB{h.DB2, h.DB3}
+}
 
 func main() {
 
@@ -242,8 +252,17 @@ func (h *Handler) checkSessionMiddleware(next echo.HandlerFunc) echo.HandlerFunc
 
 		userSession := new(Session)
 		query := "SELECT * FROM user_sessions WHERE session_id=? AND deleted_at IS NULL"
-		if err := h.DB.Get(userSession, query, sessID); err != nil {
+		if err := h.getDB(userID).Get(userSession, query, sessID); err != nil {
 			if err == sql.ErrNoRows {
+
+				otherDB := h.getOtherDBs(userID)
+				for _, db := range otherDB {
+					if err = db.Get(userSession, query, sessID); err != nil {
+						continue
+					}
+					return errorResponse(c, http.StatusForbidden, ErrForbidden)
+				}
+
 				return errorResponse(c, http.StatusUnauthorized, ErrUnauthorized)
 			}
 			return errorResponse(c, http.StatusInternalServerError, err)
@@ -255,7 +274,7 @@ func (h *Handler) checkSessionMiddleware(next echo.HandlerFunc) echo.HandlerFunc
 
 		if userSession.ExpiredAt < requestAt {
 			query = "UPDATE user_sessions SET deleted_at=? WHERE session_id=?"
-			if _, err = h.DB.Exec(query, requestAt, sessID); err != nil {
+			if _, err = h.getDB(userID).Exec(query, requestAt, sessID); err != nil {
 				return errorResponse(c, http.StatusInternalServerError, err)
 			}
 			return errorResponse(c, http.StatusUnauthorized, ErrExpiredSession)
@@ -884,8 +903,9 @@ func (h *Handler) createUser(c echo.Context) error {
 		UpdatedAt: requestAt,
 		ExpiredAt: requestAt + 86400,
 	}
+	// TXをはがしたので要注意
 	query = "INSERT INTO user_sessions(id, user_id, session_id, created_at, updated_at, expired_at) VALUES (?, ?, ?, ?, ?, ?)"
-	if _, err = tx.Exec(query, sess.ID, sess.UserID, sess.SessionID, sess.CreatedAt, sess.UpdatedAt, sess.ExpiredAt); err != nil {
+	if _, err = h.getDB(sess.UserID).Exec(query, sess.ID, sess.UserID, sess.SessionID, sess.CreatedAt, sess.UpdatedAt, sess.ExpiredAt); err != nil {
 		return errorResponse(c, http.StatusInternalServerError, err)
 	}
 
@@ -961,10 +981,15 @@ func (h *Handler) login(c echo.Context) error {
 		return errorResponse(c, http.StatusInternalServerError, err)
 	}
 	defer tx.Rollback() //nolint:errcheck
+	txDB, err := h.getDB(req.UserID).Beginx()
+	if err != nil {
+		return errorResponse(c, http.StatusInternalServerError, err)
+	}
+	defer tx.Rollback() //nolint:errcheck
 
 	// sessionを更新
 	query = "UPDATE user_sessions SET deleted_at=? WHERE user_id=? AND deleted_at IS NULL"
-	if _, err = tx.Exec(query, requestAt, req.UserID); err != nil {
+	if _, err = txDB.Exec(query, requestAt, req.UserID); err != nil {
 		return errorResponse(c, http.StatusInternalServerError, err)
 	}
 	sID, err := h.generateID()
@@ -984,7 +1009,7 @@ func (h *Handler) login(c echo.Context) error {
 		ExpiredAt: requestAt + 86400,
 	}
 	query = "INSERT INTO user_sessions(id, user_id, session_id, created_at, updated_at, expired_at) VALUES (?, ?, ?, ?, ?, ?)"
-	if _, err = tx.Exec(query, sess.ID, sess.UserID, sess.SessionID, sess.CreatedAt, sess.UpdatedAt, sess.ExpiredAt); err != nil {
+	if _, err = txDB.Exec(query, sess.ID, sess.UserID, sess.SessionID, sess.CreatedAt, sess.UpdatedAt, sess.ExpiredAt); err != nil {
 		return errorResponse(c, http.StatusInternalServerError, err)
 	}
 
