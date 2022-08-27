@@ -6,9 +6,9 @@ ENV_FILE:=env
 
 # 問題によって変わる変数
 USER:=isucon
-BIN_NAME:=isuconquest.go
+BIN_NAME:=isuconquest
 BUILD_DIR:=/home/isucon/webapp/go
-SERVICE_NAME:=$(BIN_NAME).service
+SERVICE_NAME:=$(BIN_NAME).go.service
 
 DB_PATH:=/etc/mysql
 NGINX_PATH:=/etc/nginx
@@ -40,7 +40,7 @@ deploy-conf: check-server-id deploy-db-conf deploy-nginx-conf deploy-service-fil
 
 # ベンチマークを走らせる直前に実行する
 .PHONY: bench
-bench: check-server-id discocat-now-status rm-logs deploy-conf restart watch-service-log
+bench: check-server-id discocat-now-status rm-logs deploy-conf build restart watch-service-log
 
 # slow queryを確認する
 .PHONY: slow-query
