@@ -122,6 +122,21 @@ func main() {
 	defer dbx3.Close()
 	defer dbx4.Close()
 
+	dbx.SetMaxOpenConns(500)
+	dbx2.SetMaxOpenConns(500)
+	dbx3.SetMaxOpenConns(500)
+	dbx4.SetMaxOpenConns(500)
+
+	dbx.SetConnMaxLifetime(120 * time.Second)
+	dbx2.SetConnMaxLifetime(120 * time.Second)
+	dbx3.SetConnMaxLifetime(120 * time.Second)
+	dbx4.SetConnMaxLifetime(120 * time.Second)
+
+	dbx.SetMaxIdleConns(50)
+	dbx2.SetMaxIdleConns(50)
+	dbx3.SetMaxIdleConns(50)
+	dbx4.SetMaxIdleConns(50)
+
 	// setting server
 	e.Server.Addr = fmt.Sprintf(":%v", "8080")
 	h := &Handler{
