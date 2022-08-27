@@ -1,6 +1,6 @@
 module github.com/isucon/isucon12-final/webapp/go
 
-go 1.18
+go 1.19
 
 require (
 	github.com/felixge/fgprof v0.9.2
