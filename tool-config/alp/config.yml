@@ -7,9 +7,24 @@ output: count,5xx,method,uri,min,max,sum,avg,p99                    # string(com
 # 必ず`^`と`&`を使った完全一致の記述を行うこと
 matching_groups:            # array
   - ^/initialize$
-  
-  # example
-  - ^/playlist/[0-9a-zA-Z]+/edit$
+  - ^/health$
+  - ^/login$
+  - ^/user$
+  - ^/user/[0-9]+/gacha/index$
+  #- ^/user/[0-9]+/gacha/draw/$
+  - ^/user/[0-9]+/present/index/[0-9]+$
+  - ^/user/[0-9]+/present/receive$
+  - ^/user/[0-9]+/item$
+  #- ^/user/[0-9]+/card/addexp$
+  - ^/user/[0-9]+/card$
+  - ^/user/[0-9]+/reward$
+  - ^/user/[0-9]+/home$
+
+  - ^/admin/login$
+  - ^/admin/logout$
+  - ^/admin/master$
+  - ^/admin/user/[0-9]+$
+  - ^/admin/user/[0-9]+/ban$
 
 
 
