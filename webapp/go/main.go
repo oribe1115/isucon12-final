@@ -21,6 +21,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 	"github.com/pkg/errors"
+	"github.com/samber/lo"
 
 	"github.com/felixge/fgprof"
 )
@@ -450,17 +451,31 @@ func (h *Handler) obtainPresent(tx *sqlx.Tx, userID int64, requestAt int64) ([]*
 	}
 
 	// 全員プレゼント取得情報更新
-	obtainPresents := make([]*UserPresent, 0)
+	presentIDs := lo.Map(normalPresents, func(np *PresentAllMaster, _ int) int64 { return np.ID })
+	query = "SELECT * FROM user_present_all_received_history WHERE user_id=? AND present_all_id IN (?)"
+	received := make([]*UserPresentAllReceivedHistory, 0)
+	receivedPresents := make(map[int64]struct{}, len(received))
+	if len(presentIDs) > 0 {
+		query, params, err := sqlx.In(query, userID, presentIDs)
+		if err != nil {
+			return nil, err
+		}
+		if err := tx.Select(&received, query, params...); err != nil {
+			return nil, err
+		}
+		for _, history := range received {
+			receivedPresents[history.PresentAllID] = struct{}{}
+		}
+	}
+
+	obtainPresents := make([]*UserPresent, 0, len(normalPresents)-len(receivedPresents))
+	historyToInsert := make([]*UserPresentAllReceivedHistory, 0, len(normalPresents)-len(receivedPresents))
+
 	for _, np := range normalPresents {
-		received := new(UserPresentAllReceivedHistory)
-		query = "SELECT * FROM user_present_all_received_history WHERE user_id=? AND present_all_id=?"
-		err := tx.Get(received, query, userID, np.ID)
-		if err == nil {
+		_, ok := receivedPresents[np.ID]
+		if ok {
 			// プレゼント配布済
 			continue
-		}
-		if err != sql.ErrNoRows {
-			return nil, err
 		}
 
 		// user present boxに入れる
@@ -479,10 +494,7 @@ func (h *Handler) obtainPresent(tx *sqlx.Tx, userID int64, requestAt int64) ([]*
 			CreatedAt:      requestAt,
 			UpdatedAt:      requestAt,
 		}
-		query = "INSERT INTO user_presents(id, user_id, sent_at, item_type, item_id, amount, present_message, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
-		if _, err := tx.Exec(query, up.ID, up.UserID, up.SentAt, up.ItemType, up.ItemID, up.Amount, up.PresentMessage, up.CreatedAt, up.UpdatedAt); err != nil {
-			return nil, err
-		}
+		obtainPresents = append(obtainPresents, up)
 
 		// historyに入れる
 		phID, err := h.generateID()
@@ -497,20 +509,20 @@ func (h *Handler) obtainPresent(tx *sqlx.Tx, userID int64, requestAt int64) ([]*
 			CreatedAt:    requestAt,
 			UpdatedAt:    requestAt,
 		}
-		query = "INSERT INTO user_present_all_received_history(id, user_id, present_all_id, received_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)"
-		if _, err := tx.Exec(
-			query,
-			history.ID,
-			history.UserID,
-			history.PresentAllID,
-			history.ReceivedAt,
-			history.CreatedAt,
-			history.UpdatedAt,
-		); err != nil {
+		historyToInsert = append(historyToInsert, history)
+	}
+
+	if len(obtainPresents) > 0 {
+		query = "INSERT INTO user_presents(id, user_id, sent_at, item_type, item_id, amount, present_message, created_at, updated_at) VALUES (:id, :user_id, :sent_at, :item_type, :item_id, :amount, :present_message, :created_at, :updated_at)"
+		if _, err := tx.NamedExec(query, obtainPresents); err != nil {
 			return nil, err
 		}
-
-		obtainPresents = append(obtainPresents, up)
+	}
+	if len(historyToInsert) > 0 {
+		query = "INSERT INTO user_present_all_received_history(id, user_id, present_all_id, received_at, created_at, updated_at) VALUES (:id, :user_id, :present_all_id, :received_at, :created_at, :updated_at)"
+		if _, err := tx.NamedExec(query, historyToInsert); err != nil {
+			return nil, err
+		}
 	}
 
 	return obtainPresents, nil
@@ -1171,12 +1183,11 @@ func (h *Handler) drawGacha(c echo.Context) error {
 			CreatedAt:      requestAt,
 			UpdatedAt:      requestAt,
 		}
-		query = "INSERT INTO user_presents(id, user_id, sent_at, item_type, item_id, amount, present_message, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
-		if _, err := tx.Exec(query, present.ID, present.UserID, present.SentAt, present.ItemType, present.ItemID, present.Amount, present.PresentMessage, present.CreatedAt, present.UpdatedAt); err != nil {
-			return errorResponse(c, http.StatusInternalServerError, err)
-		}
-
 		presents = append(presents, present)
+	}
+	query = "INSERT INTO user_presents(id, user_id, sent_at, item_type, item_id, amount, present_message, created_at, updated_at) VALUES (:id, :user_id, :sent_at, :item_type, :item_id, :amount, :present_message, :created_at, :updated_at)"
+	if _, err := tx.NamedExec(query, presents); err != nil {
+		return errorResponse(c, http.StatusInternalServerError, err)
 	}
 
 	// isuconをへらす
