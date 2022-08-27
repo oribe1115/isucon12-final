@@ -2,6 +2,7 @@ package main
 
 import (
 	"database/sql"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -12,9 +13,11 @@ import (
 	"os"
 	"os/exec"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"time"
 
+	"github.com/cespare/xxhash"
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
@@ -51,7 +54,31 @@ const (
 )
 
 type Handler struct {
-	DB *sqlx.DB
+	DB  *sqlx.DB
+	DB2 *sqlx.DB
+	DB3 *sqlx.DB
+}
+
+func userXXHash(userID int64) uint64 {
+	x := xxhash.New()
+	var b [8]byte
+	binary.LittleEndian.PutUint64(b[:], uint64(userID))
+	_, _ = x.Write(b[:])
+	return x.Sum64()
+}
+
+func (h *Handler) getDB(userID int64) *sqlx.DB {
+	return []*sqlx.DB{h.DB2, h.DB3}[userXXHash(userID)%2]
+}
+func (h *Handler) getOtherDBs(userID int64) []*sqlx.DB {
+	val := userXXHash(userID) % 2
+	if val == 0 {
+		return []*sqlx.DB{h.DB3}
+	}
+	if val == 1 {
+		return []*sqlx.DB{h.DB2}
+	}
+	return []*sqlx.DB{h.DB2, h.DB3}
 }
 
 func main() {
@@ -66,7 +93,7 @@ func main() {
 	time.Local = time.FixedZone("Local", 9*60*60)
 
 	e := echo.New()
-	e.Use(middleware.Logger())
+	//e.Use(middleware.Logger())
 	e.Use(middleware.Recover())
 	e.Use(middleware.CORSWithConfig(middleware.CORSConfig{
 		AllowOrigins: []string{"*"},
@@ -75,16 +102,22 @@ func main() {
 	}))
 
 	// connect db
-	dbx, err := connectDB(false)
-	if err != nil {
-		e.Logger.Fatalf("failed to connect to db: %v", err)
+	dbx, err := connectDB(false, getEnv("ISUCON_DB_HOST", "127.0.0.1"))
+	dbx2, err2 := connectDB(false, getEnv("ISUCON_DB_HOST2", "127.0.0.1"))
+	dbx3, err3 := connectDB(false, getEnv("ISUCON_DB_HOST3", "127.0.0.1"))
+	if err != nil || err2 != nil || err3 != nil {
+		e.Logger.Fatalf("failed to connect to db: %v,  %v,  %v", err, err2, err3)
 	}
 	defer dbx.Close()
+	defer dbx2.Close()
+	defer dbx3.Close()
 
 	// setting server
 	e.Server.Addr = fmt.Sprintf(":%v", "8080")
 	h := &Handler{
-		DB: dbx,
+		DB:  dbx,
+		DB2: dbx2,
+		DB3: dbx3,
 	}
 
 	// e.Use(middleware.CORS())
@@ -92,6 +125,7 @@ func main() {
 
 	// utility
 	e.POST("/initialize", initialize)
+	e.POST("/initializeDB", initializeDB)
 	e.GET("/health", h.health)
 
 	// feature
@@ -123,12 +157,12 @@ func main() {
 	e.Logger.Error(e.StartServer(e.Server))
 }
 
-func connectDB(batch bool) (*sqlx.DB, error) {
+func connectDB(batch bool, host string) (*sqlx.DB, error) {
 	dsn := fmt.Sprintf(
 		"%s:%s@tcp(%s:%s)/%s?charset=utf8mb4&parseTime=true&loc=%s&multiStatements=%t&interpolateParams=true",
 		getEnv("ISUCON_DB_USER", "isucon"),
 		getEnv("ISUCON_DB_PASSWORD", "isucon"),
-		getEnv("ISUCON_DB_HOST", "127.0.0.1"),
+		host,
 		getEnv("ISUCON_DB_PORT", "3306"),
 		getEnv("ISUCON_DB_NAME", "isucon"),
 		"Asia%2FTokyo",
@@ -218,8 +252,17 @@ func (h *Handler) checkSessionMiddleware(next echo.HandlerFunc) echo.HandlerFunc
 
 		userSession := new(Session)
 		query := "SELECT * FROM user_sessions WHERE session_id=?"
-		if err := h.DB.Get(userSession, query, sessID); err != nil {
+		if err := h.getDB(userID).Get(userSession, query, sessID); err != nil {
 			if err == sql.ErrNoRows {
+
+				otherDB := h.getOtherDBs(userID)
+				for _, db := range otherDB {
+					if err = db.Get(userSession, query, sessID); err != nil {
+						continue
+					}
+					return errorResponse(c, http.StatusForbidden, ErrForbidden)
+				}
+
 				return errorResponse(c, http.StatusUnauthorized, ErrUnauthorized)
 			}
 			return errorResponse(c, http.StatusInternalServerError, err)
@@ -231,7 +274,7 @@ func (h *Handler) checkSessionMiddleware(next echo.HandlerFunc) echo.HandlerFunc
 
 		if userSession.ExpiredAt < requestAt {
 			query = "DELETE FROM user_sessions WHERE session_id=?"
-			if _, err = h.DB.Exec(query, sessID); err != nil {
+			if _, err = h.getDB(userID).Exec(query, sessID); err != nil {
 				return errorResponse(c, http.StatusInternalServerError, err)
 			}
 			return errorResponse(c, http.StatusUnauthorized, ErrExpiredSession)
@@ -514,7 +557,8 @@ func (h *Handler) obtainPresent(tx *sqlx.Tx, userID int64, requestAt int64) ([]*
 
 	if len(obtainPresents) > 0 {
 		query = "INSERT INTO user_presents(id, user_id, sent_at, item_type, item_id, amount, present_message, created_at, updated_at) VALUES (:id, :user_id, :sent_at, :item_type, :item_id, :amount, :present_message, :created_at, :updated_at)"
-		if _, err := tx.NamedExec(query, obtainPresents); err != nil {
+		// TXをはがしたので要注意
+		if _, err := h.getDB(userID).NamedExec(query, obtainPresents); err != nil {
 			return nil, err
 		}
 	}
@@ -641,7 +685,62 @@ func (h *Handler) obtainItem(tx *sqlx.Tx, userID, itemID int64, itemType int, ob
 // initialize 初期化処理
 // POST /initialize
 func initialize(c echo.Context) error {
-	dbx, err := connectDB(true)
+	fin2 := make(chan struct{})
+	go func() {
+		req, err := http.NewRequest(
+			"POST",
+			fmt.Sprintf("http://%s/initializeDB", getEnv("ISUCON_DB_HOST2", "127.0.0.1")),
+			strings.NewReader(""),
+		)
+		if err != nil {
+			panic(err)
+		}
+		client := &http.Client{}
+		resp, err := client.Do(req)
+		if err != nil {
+			panic(err)
+		}
+		defer resp.Body.Close()
+
+		close(fin2)
+	}()
+	fin3 := make(chan struct{})
+	go func() {
+		if getEnv("ISUCON_DB_HOST3", "127.0.0.1") == getEnv("ISUCON_DB_HOST2", "127.0.0.1") {
+			close(fin3)
+			return
+		}
+
+		req, err := http.NewRequest(
+			"POST",
+			fmt.Sprintf("http://%s/initializeDB", getEnv("ISUCON_DB_HOST3", "127.0.0.1")),
+			strings.NewReader(""),
+		)
+		if err != nil {
+			panic(err)
+		}
+		client := &http.Client{}
+		resp, err := client.Do(req)
+		if err != nil {
+			panic(err)
+		}
+		defer resp.Body.Close()
+
+		close(fin3)
+	}()
+
+	err := initializeDB(c)
+
+	<-fin2
+	<-fin3
+
+	return err
+}
+
+// initialize 初期化処理
+// POST /initializeDB
+func initializeDB(c echo.Context) error {
+	dbx, err := connectDB(true, getEnv("ISUCON_DB_HOST", "127.0.0.1"))
 	if err != nil {
 		return errorResponse(c, http.StatusInternalServerError, err)
 	}
@@ -804,8 +903,9 @@ func (h *Handler) createUser(c echo.Context) error {
 		UpdatedAt: requestAt,
 		ExpiredAt: requestAt + 86400,
 	}
+	// TXをはがしたので要注意
 	query = "INSERT INTO user_sessions(id, user_id, session_id, created_at, updated_at, expired_at) VALUES (?, ?, ?, ?, ?, ?)"
-	if _, err = tx.Exec(query, sess.ID, sess.UserID, sess.SessionID, sess.CreatedAt, sess.UpdatedAt, sess.ExpiredAt); err != nil {
+	if _, err = h.getDB(sess.UserID).Exec(query, sess.ID, sess.UserID, sess.SessionID, sess.CreatedAt, sess.UpdatedAt, sess.ExpiredAt); err != nil {
 		return errorResponse(c, http.StatusInternalServerError, err)
 	}
 
@@ -881,10 +981,15 @@ func (h *Handler) login(c echo.Context) error {
 		return errorResponse(c, http.StatusInternalServerError, err)
 	}
 	defer tx.Rollback() //nolint:errcheck
+	txDB, err := h.getDB(req.UserID).Beginx()
+	if err != nil {
+		return errorResponse(c, http.StatusInternalServerError, err)
+	}
+	defer txDB.Rollback() //nolint:errcheck
 
 	// sessionを更新
-	query = "UPDATE user_sessions SET deleted_at=? WHERE user_id=? AND deleted_at IS NULL"
-	if _, err = tx.Exec(query, requestAt, req.UserID); err != nil {
+	query = "DELETE FROM user_sessions WHERE user_id=?"
+	if _, err = txDB.Exec(query, req.UserID); err != nil {
 		return errorResponse(c, http.StatusInternalServerError, err)
 	}
 	sID, err := h.generateID()
@@ -904,7 +1009,7 @@ func (h *Handler) login(c echo.Context) error {
 		ExpiredAt: requestAt + 86400,
 	}
 	query = "INSERT INTO user_sessions(id, user_id, session_id, created_at, updated_at, expired_at) VALUES (?, ?, ?, ?, ?, ?)"
-	if _, err = tx.Exec(query, sess.ID, sess.UserID, sess.SessionID, sess.CreatedAt, sess.UpdatedAt, sess.ExpiredAt); err != nil {
+	if _, err = txDB.Exec(query, sess.ID, sess.UserID, sess.SessionID, sess.CreatedAt, sess.UpdatedAt, sess.ExpiredAt); err != nil {
 		return errorResponse(c, http.StatusInternalServerError, err)
 	}
 
@@ -919,6 +1024,10 @@ func (h *Handler) login(c echo.Context) error {
 		}
 
 		err = tx.Commit()
+		if err != nil {
+			return errorResponse(c, http.StatusInternalServerError, err)
+		}
+		err = txDB.Commit()
 		if err != nil {
 			return errorResponse(c, http.StatusInternalServerError, err)
 		}
@@ -943,6 +1052,10 @@ func (h *Handler) login(c echo.Context) error {
 	}
 
 	err = tx.Commit()
+	if err != nil {
+		return errorResponse(c, http.StatusInternalServerError, err)
+	}
+	err = txDB.Commit()
 	if err != nil {
 		return errorResponse(c, http.StatusInternalServerError, err)
 	}
@@ -1185,8 +1298,9 @@ func (h *Handler) drawGacha(c echo.Context) error {
 		}
 		presents = append(presents, present)
 	}
+	// TXをはがしたので要注意
 	query = "INSERT INTO user_presents(id, user_id, sent_at, item_type, item_id, amount, present_message, created_at, updated_at) VALUES (:id, :user_id, :sent_at, :item_type, :item_id, :amount, :present_message, :created_at, :updated_at)"
-	if _, err := tx.NamedExec(query, presents); err != nil {
+	if _, err := h.getDB(userID).NamedExec(query, presents); err != nil {
 		return errorResponse(c, http.StatusInternalServerError, err)
 	}
 
@@ -1239,12 +1353,12 @@ func (h *Handler) listPresent(c echo.Context) error {
 	WHERE user_id = ? AND deleted_at IS NULL
 	ORDER BY created_at DESC, id
 	LIMIT ? OFFSET ?`
-	if err = h.DB.Select(&presentList, query, userID, PresentCountPerPage, offset); err != nil {
+	if err = h.getDB(userID).Select(&presentList, query, userID, PresentCountPerPage, offset); err != nil {
 		return errorResponse(c, http.StatusInternalServerError, err)
 	}
 
 	var presentCount int
-	if err = h.DB.Get(&presentCount, "SELECT COUNT(*) FROM user_presents WHERE user_id = ? AND deleted_at IS NULL", userID); err != nil {
+	if err = h.getDB(userID).Get(&presentCount, "SELECT COUNT(*) FROM user_presents WHERE user_id = ? AND deleted_at IS NULL", userID); err != nil {
 		return errorResponse(c, http.StatusInternalServerError, err)
 	}
 
@@ -1302,7 +1416,7 @@ func (h *Handler) receivePresent(c echo.Context) error {
 		return errorResponse(c, http.StatusBadRequest, err)
 	}
 	obtainPresent := []*UserPresent{}
-	if err = h.DB.Select(&obtainPresent, query, params...); err != nil {
+	if err = h.getDB(userID).Select(&obtainPresent, query, params...); err != nil {
 		return errorResponse(c, http.StatusBadRequest, err)
 	}
 
@@ -1317,6 +1431,11 @@ func (h *Handler) receivePresent(c echo.Context) error {
 		return errorResponse(c, http.StatusInternalServerError, err)
 	}
 	defer tx.Rollback() //nolint:errcheck
+	txUID, err := h.getDB(userID).Beginx()
+	if err != nil {
+		return errorResponse(c, http.StatusInternalServerError, err)
+	}
+	defer txUID.Rollback() //nolint:errcheck
 	query = "UPDATE user_presents SET deleted_at=?, updated_at=? WHERE id IN (?)"
 	ids := make([]int64, 0, len(obtainPresent))
 	for _, v := range obtainPresent {
@@ -1326,7 +1445,7 @@ func (h *Handler) receivePresent(c echo.Context) error {
 	if err != nil {
 		return errorResponse(c, http.StatusBadRequest, err)
 	}
-	_, err = tx.Exec(query, params...)
+	_, err = txUID.Exec(query, params...)
 	if err != nil {
 		return errorResponse(c, http.StatusInternalServerError, err)
 	}
@@ -1353,6 +1472,10 @@ func (h *Handler) receivePresent(c echo.Context) error {
 		}
 	}
 	err = tx.Commit()
+	if err != nil {
+		return errorResponse(c, http.StatusInternalServerError, err)
+	}
+	err = txUID.Commit()
 	if err != nil {
 		return errorResponse(c, http.StatusInternalServerError, err)
 	}
