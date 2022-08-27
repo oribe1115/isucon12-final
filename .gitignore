@@ -37,9 +37,7 @@ logs
 pprof
 
 tmp
-vetur.config.js
-.envrc
-isucon_listen80_dump*
-users.json
 
-sql/90_isucon_listen80_dump.sql
+4_alldata_exclude_user_presents.sql
+5_user_presents_not_receive_data.tsv
+
