@@ -37,6 +37,8 @@ env
 !s1/home/isucon/env
 !s2/home/isucon/env
 !s3/home/isucon/env
+!s4/home/isucon/env
+!s5/home/isucon/env
 
 logs
 pprof
