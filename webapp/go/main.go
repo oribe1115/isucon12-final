@@ -132,10 +132,10 @@ func main() {
 	dbx3.SetConnMaxLifetime(120 * time.Second)
 	dbx4.SetConnMaxLifetime(120 * time.Second)
 
-	dbx.SetMaxIdleConns(50)
-	dbx2.SetMaxIdleConns(50)
-	dbx3.SetMaxIdleConns(50)
-	dbx4.SetMaxIdleConns(50)
+	dbx.SetMaxIdleConns(250)
+	dbx2.SetMaxIdleConns(250)
+	dbx3.SetMaxIdleConns(250)
+	dbx4.SetMaxIdleConns(250)
 
 	// setting server
 	e.Server.Addr = fmt.Sprintf(":%v", "8080")
