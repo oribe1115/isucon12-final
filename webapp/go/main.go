@@ -8,21 +8,20 @@ import (
 	"math"
 	"math/rand"
 	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"os/exec"
 	"strconv"
+	"sync/atomic"
 	"time"
 
-	"github.com/go-sql-driver/mysql"
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 	"github.com/pkg/errors"
 
-	
 	"github.com/felixge/fgprof"
-	_ "net/http/pprof"
 )
 
 var (
@@ -55,7 +54,7 @@ type Handler struct {
 
 func main() {
 
-	//http.DefaultServeMux.Handle("/debug/pprof/profile", fgprof.Handler())
+	// http.DefaultServeMux.Handle("/debug/pprof/profile", fgprof.Handler())
 	http.DefaultServeMux.Handle("/debug/fgprof", fgprof.Handler())
 	go func() {
 		http.ListenAndServe(":6060", nil)
@@ -1904,27 +1903,26 @@ func noContentResponse(c echo.Context, status int) error {
 	return c.NoContent(status)
 }
 
+var (
+	serverId  int64
+	currentId int64 = 100000000001 / 8
+)
+
+func init() {
+	serverIdStr := os.Getenv("SERVER_ID") // "s1"
+	if serverIdStr == "" {
+		serverIdStr = "s1"
+	}
+	id, err := strconv.ParseInt(serverIdStr[1:], 10, 64)
+	if err == nil {
+		serverId = id
+	}
+}
+
 // generateID uniqueなIDを生成する
 func (h *Handler) generateID() (int64, error) {
-	var updateErr error
-	for i := 0; i < 100; i++ {
-		res, err := h.DB.Exec("UPDATE id_generator SET id=LAST_INSERT_ID(id+1)")
-		if err != nil {
-			if merr, ok := err.(*mysql.MySQLError); ok && merr.Number == 1213 {
-				updateErr = err
-				continue
-			}
-			return 0, err
-		}
-
-		id, err := res.LastInsertId()
-		if err != nil {
-			return 0, err
-		}
-		return id, nil
-	}
-
-	return 0, fmt.Errorf("failed to generate id: %w", updateErr)
+	next := atomic.AddInt64(&currentId, 1)
+	return (next << 3) | serverId, nil
 }
 
 // generateSessionID
