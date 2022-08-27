@@ -88,7 +88,7 @@ pprof-check:
 # DBに接続する
 .PHONY: access-db
 access-db:
-	mysql -h $(MYSQL_HOST) -P $(MYSQL_PORT) -u $(MYSQL_USER) -p$(MYSQL_PASS) $(MYSQL_DBNAME)
+	mysql -h $(ISUCON_DB_HOST) -P $(ISUCON_DB_PORT) -u $(ISUCON_DB_USER) -p$(ISUCON_DB_PASSWORD) $(ISUCON_DB_NAME)
 
 # 主要コマンドの構成要素 ------------------------
 
