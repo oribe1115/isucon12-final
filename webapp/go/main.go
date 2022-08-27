@@ -491,7 +491,7 @@ func (h *Handler) obtainLoginBonus(tx *sqlx.Tx, userID int64, requestAt int64) (
 		}
 
 		datum := &ObtainItemDatum{
-			ItemID:       rewardItem.ID,
+			ItemID:       rewardItem.ItemID,
 			ItemType:     rewardItem.ItemType,
 			ObtainAmount: rewardItem.Amount,
 			RequestAt:    requestAt,
