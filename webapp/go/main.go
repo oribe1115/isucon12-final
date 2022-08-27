@@ -67,6 +67,9 @@ func userXXHash(userID int64) uint64 {
 	return x.Sum64()
 }
 
+func (h *Handler) getALLDB() []*sqlx.DB {
+	return []*sqlx.DB{h.DB, h.DB2, h.DB3}
+}
 func (h *Handler) getDB(userID int64) *sqlx.DB {
 	return []*sqlx.DB{h.DB2, h.DB3}[userXXHash(userID)%2]
 }
