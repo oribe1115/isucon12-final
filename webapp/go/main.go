@@ -463,7 +463,7 @@ func (h *Handler) obtainPresent(tx *sqlx.Tx, userID int64, requestAt int64) ([]*
 	}
 	receivedPresents := make(map[int64]struct{}, len(received))
 	for _, history := range received {
-		receivedPresents[history.ID] = struct{}{}
+		receivedPresents[history.PresentAllID] = struct{}{}
 	}
 
 	obtainPresents := make([]*UserPresent, 0, len(normalPresents)-len(receivedPresents))
