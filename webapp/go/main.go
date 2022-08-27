@@ -1306,7 +1306,7 @@ func (h *Handler) receivePresent(c echo.Context) error {
 		return errorResponse(c, http.StatusInternalServerError, err)
 	}
 	defer tx.Rollback() //nolint:errcheck
-	query = "UPDATE user_presents SET deleted_at=?, updated_at=? WHERE idi IN (?)"
+	query = "UPDATE user_presents SET deleted_at=?, updated_at=? WHERE id IN (?)"
 	ids := make([]int64, 0, len(obtainPresent))
 	for _, v := range obtainPresent {
 		ids = append(ids, v.ID)
