@@ -729,9 +729,11 @@ func (h *Handler) obtainOthers(tx *sqlx.Tx, userID int64, obtainItemDataOrig []*
 	obtainItemData := map[int64]*ObtainItemDatum{}
 	for _, v := range obtainItemDataOrig {
 		tmp, ok := obtainItemData[v.ItemID]
-		if ok && tmp.ItemType != v.ItemType {
+		if ok {
 			obtainItemData[v.ItemID].ObtainAmount += v.ObtainAmount
-			return nil, ErrItemNotFound
+			if tmp.ItemType != v.ItemType {
+				return nil, ErrItemNotFound
+			}
 		} else {
 			obtainItemData[v.ItemID] = v
 		}
