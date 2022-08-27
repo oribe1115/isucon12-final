@@ -23,6 +23,7 @@ import (
 	"github.com/jmoiron/sqlx"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
+	"github.com/labstack/gommon/log"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
 	"golang.org/x/sync/errgroup"
@@ -108,6 +109,9 @@ func main() {
 		AllowMethods: []string{http.MethodGet, http.MethodPost},
 		AllowHeaders: []string{"Content-Type", "x-master-version", "x-session"},
 	}))
+
+	e.Debug = false
+	e.Logger.SetLevel(log.ERROR)
 
 	// connect db
 	dbx, err := connectDB(false, getEnv("ISUCON_DB_HOST", "127.0.0.1"))

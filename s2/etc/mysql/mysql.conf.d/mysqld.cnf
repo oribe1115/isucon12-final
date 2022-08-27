@@ -62,7 +62,7 @@ max_connections        = 500
 log_error = /var/log/mysql/error.log
 #
 # Here you can see queries with especially long duration
-slow_query_log		= 1
+# slow_query_log		= 1
 slow_query_log_file	= /var/log/mysql/mysql-slow.log
 long_query_time = 0
 log-queries-not-using-indexes
