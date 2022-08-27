@@ -1,7 +1,8 @@
-include env.sh
+include env
+ENV_FILE:=env
 # 変数定義 ------------------------
 
-# SERVER_ID: env.sh内で定義
+# SERVER_ID: ENV_FILE内で定義
 
 # 問題によって変わる変数
 USER:=isucon
@@ -126,15 +127,15 @@ endif
 
 .PHONY: set-as-s1
 set-as-s1:
-	echo "SERVER_ID=s1" >> env.sh
+	echo "SERVER_ID=s1" >> $(ENV_FILE)
 
 .PHONY: set-as-s2
 set-as-s2:
-	echo "SERVER_ID=s2" >> env.sh
+	echo "SERVER_ID=s2" >> $(ENV_FILE)
 
 .PHONY: set-as-s3
 set-as-s3:
-	echo "SERVER_ID=s3" >> env.sh
+	echo "SERVER_ID=s3" >> $(ENV_FILE)
 
 .PHONY: get-db-conf
 get-db-conf:
@@ -153,7 +154,7 @@ get-service-file:
 
 .PHONY: get-envsh
 get-envsh:
-	cp ~/env.sh ~/$(SERVER_ID)/home/isucon/env.sh
+	cp ~/$(ENV_FILE) ~/$(SERVER_ID)/home/isucon/$(ENV_FILE)
 
 .PHONY: deploy-db-conf
 deploy-db-conf:
@@ -169,7 +170,7 @@ deploy-service-file:
 
 .PHONY: deploy-envsh
 deploy-envsh:
-	cp ~/$(SERVER_ID)/home/isucon/env.sh ~/env.sh
+	cp ~/$(SERVER_ID)/home/isucon/$(ENV_FILE) ~/$(ENV_FILE)
 
 .PHONY: build
 build:
