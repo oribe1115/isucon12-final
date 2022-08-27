@@ -619,7 +619,7 @@ type ObtainItemDatum struct {
 	RequestAt    int64
 }
 
-func (h *Handler) obtainItems(tx *sqlx.Tx, userID int64, obtainItemData []*ObtainItemDatum) ([]int64, []*UserCard, []*UserItem, error) {
+func (h *Handler) obtainItems(tx *sqlx.Tx, userID int64, obtainItemData []*ObtainItemDatum) (coins []int64, cards []*UserCard, others []*UserItem, err error) {
 	coinRequests := make([]*ObtainItemDatum, 0)
 	cardRequests := make([]*ObtainItemDatum, 0)
 	otherRequests := make([]*ObtainItemDatum, 0)
@@ -638,19 +638,25 @@ func (h *Handler) obtainItems(tx *sqlx.Tx, userID int64, obtainItemData []*Obtai
 		}
 	}
 
-	coins, err := obtainCoins(tx, userID, coinRequests)
-	if err != nil {
-		return nil, nil, nil, err
+	if len(coinRequests) != 0 {
+		coins, err = obtainCoins(tx, userID, coinRequests)
+		if err != nil {
+			return nil, nil, nil, err
+		}
 	}
 
-	cards, err := h.obtainCards(tx, userID, cardRequests)
-	if err != nil {
-		return nil, nil, nil, err
+	if len(cardRequests) != 0 {
+		cards, err = h.obtainCards(tx, userID, cardRequests)
+		if err != nil {
+			return nil, nil, nil, err
+		}
 	}
 
-	others, err := h.obtainOthers(tx, userID, otherRequests)
-	if err != nil {
-		return nil, nil, nil, err
+	if len(otherRequests) != 0 {
+		others, err = h.obtainOthers(tx, userID, otherRequests)
+		if err != nil {
+			return nil, nil, nil, err
+		}
 	}
 
 	return coins, cards, others, nil
