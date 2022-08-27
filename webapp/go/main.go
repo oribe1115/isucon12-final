@@ -105,6 +105,7 @@ func main() {
 
 	// utility
 	e.POST("/initialize", initialize)
+	e.POST("/initializeDB", initializeDB)
 	e.GET("/health", h.health)
 
 	// feature
@@ -655,17 +656,11 @@ func (h *Handler) obtainItem(tx *sqlx.Tx, userID, itemID int64, itemType int, ob
 // initialize 初期化処理
 // POST /initialize
 func initialize(c echo.Context) error {
-	dbx, err := connectDB(true, getEnv("ISUCON_DB_HOST", "127.0.0.1"))
-	if err != nil {
-		return errorResponse(c, http.StatusInternalServerError, err)
-	}
-	defer dbx.Close()
-
 	fin2 := make(chan struct{})
 	go func() {
 		req, err := http.NewRequest(
 			"POST",
-			fmt.Sprintf("http://%s/initialize", getEnv("ISUCON_DB_HOST2", "127.0.0.1")),
+			fmt.Sprintf("http://%s/initializeDB", getEnv("ISUCON_DB_HOST2", "127.0.0.1")),
 			strings.NewReader(""),
 		)
 		if err != nil {
@@ -689,7 +684,7 @@ func initialize(c echo.Context) error {
 
 		req, err := http.NewRequest(
 			"POST",
-			fmt.Sprintf("http://%s/initialize", getEnv("ISUCON_DB_HOST3", "127.0.0.1")),
+			fmt.Sprintf("http://%s/initializeDB", getEnv("ISUCON_DB_HOST3", "127.0.0.1")),
 			strings.NewReader(""),
 		)
 		if err != nil {
@@ -705,14 +700,28 @@ func initialize(c echo.Context) error {
 		close(fin3)
 	}()
 
+	err := initializeDB(c)
+
+	<-fin2
+	<-fin3
+
+	return err
+}
+
+// initialize 初期化処理
+// POST /initializeDB
+func initializeDB(c echo.Context) error {
+	dbx, err := connectDB(true, getEnv("ISUCON_DB_HOST", "127.0.0.1"))
+	if err != nil {
+		return errorResponse(c, http.StatusInternalServerError, err)
+	}
+	defer dbx.Close()
+
 	out, err := exec.Command("/bin/sh", "-c", SQLDirectory+"init.sh").CombinedOutput()
 	if err != nil {
 		c.Logger().Errorf("Failed to initialize %s: %v", string(out), err)
 		return errorResponse(c, http.StatusInternalServerError, err)
 	}
-
-	<-fin2
-	<-fin3
 
 	return successResponse(c, &InitializeResponse{
 		Language: "go",
