@@ -1311,7 +1311,11 @@ func (h *Handler) receivePresent(c echo.Context) error {
 	for _, v := range obtainPresent {
 		ids = append(ids, v.ID)
 	}
-	_, err = tx.Exec(query, requestAt, requestAt, ids)
+	query, params, err = sqlx.In(query, requestAt, requestAt, ids)
+	if err != nil {
+		return errorResponse(c, http.StatusBadRequest, err)
+	}
+	_, err = tx.Exec(query, params...)
 	if err != nil {
 		return errorResponse(c, http.StatusInternalServerError, err)
 	}
