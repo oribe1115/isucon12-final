@@ -54,7 +54,7 @@ const (
 )
 
 type Handler struct {
-	DB  *sqlx.DB
+	DB  *sqlx.DB // admin用DB兼任
 	DB2 *sqlx.DB
 	DB3 *sqlx.DB
 }
@@ -71,17 +71,18 @@ func (h *Handler) getALLDB() []*sqlx.DB {
 	return []*sqlx.DB{h.DB, h.DB2, h.DB3}
 }
 func (h *Handler) getDB(userID int64) *sqlx.DB {
-	return []*sqlx.DB{h.DB2, h.DB3}[userXXHash(userID)%2]
+	return []*sqlx.DB{h.DB, h.DB2, h.DB3}[userXXHash(userID)%3]
 }
 func (h *Handler) getOtherDBs(userID int64) []*sqlx.DB {
-	val := userXXHash(userID) % 2
-	if val == 0 {
-		return []*sqlx.DB{h.DB3}
+	switch userXXHash(userID) % 3 {
+	case 0:
+		return []*sqlx.DB{h.DB2, h.DB3}
+	case 1:
+		return []*sqlx.DB{h.DB, h.DB3}
+	case 2:
+		return []*sqlx.DB{h.DB2, h.DB3}
 	}
-	if val == 1 {
-		return []*sqlx.DB{h.DB2}
-	}
-	return []*sqlx.DB{h.DB2, h.DB3}
+	return h.getALLDB()
 }
 
 func main() {
