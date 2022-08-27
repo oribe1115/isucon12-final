@@ -655,7 +655,7 @@ func (h *Handler) obtainItem(tx *sqlx.Tx, userID, itemID int64, itemType int, ob
 // initialize 初期化処理
 // POST /initialize
 func initialize(c echo.Context) error {
-	dbx, err := connectDB(true)
+	dbx, err := connectDB(true, getEnv("ISUCON_DB_HOST", "127.0.0.1"))
 	if err != nil {
 		return errorResponse(c, http.StatusInternalServerError, err)
 	}
