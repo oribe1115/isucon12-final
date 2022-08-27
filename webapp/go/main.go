@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"math"
 	"math/rand"
 	"net/http"
@@ -697,6 +698,7 @@ func (h *Handler) obtainCards(tx *sqlx.Tx, userID int64, obtainItemData []*Obtai
 		return nil, err
 	}
 	if len(items) != len(itemIDs) {
+		log.Printf("obtainCards: expected %d items, got %d items", len(itemIDs), len(items))
 		return nil, ErrItemNotFound
 	}
 	itemsMaster := lo.SliceToMap(items, func(i *ItemMaster) (int64, *ItemMaster) { return i.ID, i })
@@ -707,6 +709,7 @@ func (h *Handler) obtainCards(tx *sqlx.Tx, userID int64, obtainItemData []*Obtai
 			return nil, errors.New("item not found from master")
 		}
 		if item.ItemType != d.ItemType {
+			log.Printf("obtainCards: expected item type %d, got %d", d.ItemType, item.ItemType)
 			return nil, ErrItemNotFound
 		}
 	}
@@ -745,6 +748,7 @@ func (h *Handler) obtainOthers(tx *sqlx.Tx, userID int64, obtainItemDataOrig []*
 		if ok {
 			obtainItemData[v.ItemID].ObtainAmount += v.ObtainAmount
 			if tmp.ItemType != v.ItemType {
+				log.Printf("obtainOthers L751: expected item type %d, got %d", v.ItemType, tmp.ItemType)
 				return nil, ErrItemNotFound
 			}
 		} else {
@@ -769,10 +773,12 @@ func (h *Handler) obtainOthers(tx *sqlx.Tx, userID int64, obtainItemDataOrig []*
 		return nil, err
 	}
 	if len(itemMasters) != len(itemIDsArray) {
+		log.Printf("obtainCards: expected %d items, got %d items", len(itemIDsArray), len(itemMasters))
 		return nil, ErrItemNotFound
 	}
 	for _, master := range itemMasters {
 		if master.ItemType != obtainItemData[master.ID].ItemType {
+			log.Printf("obtainOthers: expected item type %d, got %d", obtainItemData[master.ID].ItemType, master.ItemType)
 			return nil, ErrItemNotFound
 		}
 	}
