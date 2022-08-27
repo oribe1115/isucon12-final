@@ -989,7 +989,7 @@ func (h *Handler) login(c echo.Context) error {
 
 	// sessionを更新
 	query = "DELETE FROM user_sessions WHERE user_id=?"
-	if _, err = txDB.Exec(query, requestAt, req.UserID); err != nil {
+	if _, err = txDB.Exec(query, req.UserID); err != nil {
 		return errorResponse(c, http.StatusInternalServerError, err)
 	}
 	sID, err := h.generateID()
