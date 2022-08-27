@@ -78,16 +78,22 @@ func main() {
 	}))
 
 	// connect db
-	dbx, err := connectDB(false)
-	if err != nil {
-		e.Logger.Fatalf("failed to connect to db: %v", err)
+	dbx, err := connectDB(false, getEnv("ISUCON_DB_HOST", "127.0.0.1"))
+	dbx2, err2 := connectDB(false, getEnv("ISUCON_DB_HOST2", "127.0.0.1"))
+	dbx3, err3 := connectDB(false, getEnv("ISUCON_DB_HOST3", "127.0.0.1"))
+	if err != nil || err2 != nil || err3 != nil {
+		e.Logger.Fatalf("failed to connect to db: %v,  %v,  %v", err, err2, err3)
 	}
 	defer dbx.Close()
+	defer dbx2.Close()
+	defer dbx3.Close()
 
 	// setting server
 	e.Server.Addr = fmt.Sprintf(":%v", "8080")
 	h := &Handler{
-		DB: dbx,
+		DB:  dbx,
+		DB2: dbx2,
+		DB3: dbx3,
 	}
 
 	// e.Use(middleware.CORS())
@@ -126,12 +132,12 @@ func main() {
 	e.Logger.Error(e.StartServer(e.Server))
 }
 
-func connectDB(batch bool) (*sqlx.DB, error) {
+func connectDB(batch bool, host string) (*sqlx.DB, error) {
 	dsn := fmt.Sprintf(
 		"%s:%s@tcp(%s:%s)/%s?charset=utf8mb4&parseTime=true&loc=%s&multiStatements=%t&interpolateParams=true",
 		getEnv("ISUCON_DB_USER", "isucon"),
 		getEnv("ISUCON_DB_PASSWORD", "isucon"),
-		getEnv("ISUCON_DB_HOST", "127.0.0.1"),
+		host,
 		getEnv("ISUCON_DB_PORT", "3306"),
 		getEnv("ISUCON_DB_NAME", "isucon"),
 		"Asia%2FTokyo",
@@ -654,7 +660,7 @@ func initialize(c echo.Context) error {
 	go func() {
 		req, err := http.NewRequest(
 			"POST",
-			"http://133.152.6.66/initialize",
+			fmt.Sprintf("http://%s/initialize", getEnv("ISUCON_DB_HOST2", "127.0.0.1")),
 			strings.NewReader(""),
 		)
 		if err != nil {
@@ -673,7 +679,7 @@ func initialize(c echo.Context) error {
 	go func() {
 		req, err := http.NewRequest(
 			"POST",
-			"http://133.152.6.67/initialize",
+			fmt.Sprintf("http://%s/initialize", getEnv("ISUCON_DB_HOST3", "127.0.0.1")),
 			strings.NewReader(""),
 		)
 		if err != nil {
