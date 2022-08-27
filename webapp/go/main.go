@@ -810,7 +810,7 @@ func (h *Handler) obtainOthers(tx *sqlx.Tx, userID int64, obtainItemDataOrig []*
 		}
 	}
 	query = "INSERT INTO user_items(id, user_id, item_id, item_type, amount, created_at, updated_at) VALUES (:id, :user_id, :item_id, :item_type, :amount, :created_at, :supdated_at)" +
-		"ON DUPLICATE KEY UPDATE amount = VALUES(amount)"
+		"ON DUPLICATE KEY UPDATE amount = VALUES(amount), updated_at = VALUES(updated_at)"
 	if _, err := tx.NamedExec(query, uitems); err != nil {
 		return nil, err
 	}
