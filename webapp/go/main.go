@@ -57,6 +57,7 @@ type Handler struct {
 	DB  *sqlx.DB
 	DB2 *sqlx.DB
 	DB3 *sqlx.DB
+	DB4 *sqlx.DB
 }
 
 func userXXHash(userID int64) uint64 {
@@ -68,20 +69,23 @@ func userXXHash(userID int64) uint64 {
 }
 
 func (h *Handler) getALLDB() []*sqlx.DB {
-	return []*sqlx.DB{h.DB, h.DB2, h.DB3}
+	return []*sqlx.DB{h.DB, h.DB2, h.DB3, h.DB4}
 }
 func (h *Handler) getDB(userID int64) *sqlx.DB {
-	return []*sqlx.DB{h.DB2, h.DB3}[userXXHash(userID)%2]
+	return []*sqlx.DB{h.DB2, h.DB3, h.DB4}[userXXHash(userID)%3]
 }
 func (h *Handler) getOtherDBs(userID int64) []*sqlx.DB {
-	val := userXXHash(userID) % 2
+	val := userXXHash(userID) % 3
 	if val == 0 {
-		return []*sqlx.DB{h.DB3}
+		return []*sqlx.DB{h.DB3, h.DB4}
 	}
 	if val == 1 {
-		return []*sqlx.DB{h.DB2}
+		return []*sqlx.DB{h.DB2, h.DB4}
 	}
-	return []*sqlx.DB{h.DB2, h.DB3}
+	if val == 2 {
+		return []*sqlx.DB{h.DB2, h.DB3}
+	}
+	return h.getALLDB()
 }
 
 func main() {
@@ -108,12 +112,14 @@ func main() {
 	dbx, err := connectDB(false, getEnv("ISUCON_DB_HOST", "127.0.0.1"))
 	dbx2, err2 := connectDB(false, getEnv("ISUCON_DB_HOST2", "127.0.0.1"))
 	dbx3, err3 := connectDB(false, getEnv("ISUCON_DB_HOST3", "127.0.0.1"))
+	dbx4, err3 := connectDB(false, getEnv("ISUCON_DB_HOST4", "127.0.0.1"))
 	if err != nil || err2 != nil || err3 != nil {
 		e.Logger.Fatalf("failed to connect to db: %v,  %v,  %v", err, err2, err3)
 	}
 	defer dbx.Close()
 	defer dbx2.Close()
 	defer dbx3.Close()
+	defer dbx4.Close()
 
 	// setting server
 	e.Server.Addr = fmt.Sprintf(":%v", "8080")
@@ -121,6 +127,7 @@ func main() {
 		DB:  dbx,
 		DB2: dbx2,
 		DB3: dbx3,
+		DB4: dbx4,
 	}
 
 	// e.Use(middleware.CORS())
