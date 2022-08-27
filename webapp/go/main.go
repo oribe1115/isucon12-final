@@ -1407,7 +1407,7 @@ func (h *Handler) listItem(c echo.Context) error {
 
 	// genearte one time token
 	query = "DELETE FROM user_one_time_tokens WHERE user_id=?"
-	if _, err = h.DB.Exec(query, requestAt, userID); err != nil {
+	if _, err = h.DB.Exec(query, userID); err != nil {
 		return errorResponse(c, http.StatusInternalServerError, err)
 	}
 	tID, err := h.generateID()
