@@ -9,7 +9,6 @@ import (
 	"math"
 	"math/rand"
 	"net/http"
-	_ "net/http/pprof"
 	"os"
 	"os/exec"
 	"strconv"
@@ -27,8 +26,6 @@ import (
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
 	"golang.org/x/sync/errgroup"
-
-	"github.com/felixge/fgprof"
 )
 
 var (
@@ -93,10 +90,10 @@ func (h *Handler) getOtherDBs(userID int64) []*sqlx.DB {
 func main() {
 
 	// http.DefaultServeMux.Handle("/debug/pprof/profile", fgprof.Handler())
-	http.DefaultServeMux.Handle("/debug/fgprof", fgprof.Handler())
-	go func() {
-		http.ListenAndServe(":6060", nil)
-	}()
+	// http.DefaultServeMux.Handle("/debug/fgprof", fgprof.Handler())
+	// go func() {
+	// 	http.ListenAndServe(":6060", nil)
+	// }()
 
 	rand.Seed(time.Now().UnixNano())
 	time.Local = time.FixedZone("Local", 9*60*60)
@@ -2294,7 +2291,7 @@ func (h *Handler) health(c echo.Context) error {
 
 // errorResponse returns error.
 func errorResponse(c echo.Context, statusCode int, err error) error {
-	c.Logger().Errorf("status=%d, err=%+v", statusCode, errors.WithStack(err))
+	//c.Logger().Errorf("status=%d, err=%+v", statusCode, errors.WithStack(err))
 
 	return c.JSON(statusCode, struct {
 		StatusCode int    `json:"status_code"`
