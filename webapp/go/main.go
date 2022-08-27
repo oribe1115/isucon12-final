@@ -616,6 +616,18 @@ func (h *Handler) obtainItems(tx *sqlx.Tx, userID int64, obtainItemData []*Obtai
 	if err != nil {
 		return nil, nil, nil, err
 	}
+
+	cards, err := obtainCards(tx, userID, cardRequests)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	others, err := obtainOthers(tx, userID, otherRequests)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	return coins, cards, others, nil
 }
 
 func obtainCoins(tx *sqlx.Tx, userID int64, obtainItemData []*ObtainItemDatum) ([]int64, error) {
