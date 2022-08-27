@@ -33,6 +33,11 @@ env.sh
 !s2/home/isucon/env.sh
 !s3/home/isucon/env.sh
 
+env
+!s1/home/isucon/env
+!s2/home/isucon/env
+!s3/home/isucon/env
+
 logs
 pprof
 
