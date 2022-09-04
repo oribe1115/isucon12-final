@@ -318,7 +318,7 @@ func (h *Handler) checkSessionMiddleware(next echo.HandlerFunc) echo.HandlerFunc
 		}
 
 		if userSession.SessionID != sessID {
-			return errorResponse(c, http.StatusUnauthorized, ErrForbidden)
+			return errorResponse(c, http.StatusUnauthorized, ErrUnauthorized)
 		}
 
 		if userSession.ExpiredAt < requestAt {
