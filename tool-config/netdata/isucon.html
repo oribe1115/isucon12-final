@@ -78,25 +78,14 @@
     ></div>
 
     <h1>Time-series Metrics</h1>
-    <h2>System CPU</h2>
-    <div
-      data-netdata="system.cpu"
-      data-chart-library="dygraph"
-      data-height="250"
-      data-decimal-digits="-1"
-      data-dygraph-valuerange="[0, 100]"
-      data-legend-position="bottom"
-      class="netdata-container-with-legend netdata-container-with-legend--bottom"
-    ></div>
-
     <h2>Systemd Service</h2>
-    <!-- systemd serviceの時系列メトリクス -->
+    <!-- systemd serviceの時系列メトリクス(1 crore=100%) -->
     <div
       data-netdata="services.cpu"
       data-chart-library="dygraph"
       data-height="250"
       data-decimal-digits="-1"
-      data-dygraph-valuerange="[0, 100]"
+      data-dygraph-valuerange="[0, 200]" 
       data-legend-position="bottom"
       class="netdata-container-with-legend netdata-container-with-legend--bottom"
     ></div>
