@@ -1056,6 +1056,7 @@ func initialize(c echo.Context) error {
 		masterVersion.Store(tmpStr)
 		return nil
 	})
+	playerSessionCache = sync.Map{}
 	err := eg.Wait()
 	initializeEnd = time.Now()
 	maybeprepare.Store(true)
@@ -1225,7 +1226,6 @@ func (h *Handler) createUser(c echo.Context) error {
 		UpdatedAt: requestAt,
 		ExpiredAt: requestAt + 86400,
 	}
-	// TXをはがしたので要注意
 	query = "INSERT INTO user_sessions(id, user_id, session_id, created_at, updated_at, expired_at) VALUES (?, ?, ?, ?, ?, ?)"
 	if _, err = tx.Exec(query, sess.ID, sess.UserID, sess.SessionID, sess.CreatedAt, sess.UpdatedAt, sess.ExpiredAt); err != nil {
 		return errorResponse(c, http.StatusInternalServerError, err)
@@ -1235,7 +1235,7 @@ func (h *Handler) createUser(c echo.Context) error {
 	if err != nil {
 		return errorResponse(c, http.StatusInternalServerError, err)
 	}
-	playerSessionCache.Store(user.ID, sess)
+	playerSessionCache.Store(sess.UserID, sess)
 
 	return successResponse(c, &CreateUserResponse{
 		UserID:           user.ID,
@@ -1326,7 +1326,7 @@ func (h *Handler) login(c echo.Context) error {
 	if _, err = tx.Exec(query, sess.ID, sess.UserID, sess.SessionID, sess.CreatedAt, sess.UpdatedAt, sess.ExpiredAt); err != nil {
 		return errorResponse(c, http.StatusInternalServerError, err)
 	}
-	playerSessionCache.Store(user.ID, sess)
+	playerSessionCache.Store(sess.UserID, sess)
 
 	// すでにログインしているユーザはログイン処理をしない
 	if isCompleteTodayLogin(time.Unix(user.LastActivatedAt, 0), time.Unix(requestAt, 0)) {
