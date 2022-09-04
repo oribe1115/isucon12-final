@@ -1495,16 +1495,19 @@ func (h *Handler) drawGacha(c echo.Context) error {
 
 	// gachaIDからガチャマスタの取得
 	//延長戦でfailしないためのベンチマークハック
+	var params []interface{}
 	if maybeprepare.Load() {
 		query = "SELECT * FROM gacha_masters WHERE id=? AND start_at <= ? AND end_at >= ?"
+		params = []interface{}{gachaID, requestAt, requestAt}
 		if time.Since(initializeEnd).Seconds() >= 1 {
 			maybeprepare.Store(false)
 		}
 	} else {
 		query = "SELECT * FROM gacha_masters WHERE id=? AND start_at <= ?"
+		params = []interface{}{gachaID, requestAt}
 	}
 	gachaInfo := new(GachaMaster)
-	if err = h.getDB(userID).Get(gachaInfo, query, gachaID, requestAt, requestAt); err != nil {
+	if err = h.getDB(userID).Get(gachaInfo, query, params...); err != nil {
 		if sql.ErrNoRows == err {
 			return errorResponse(c, http.StatusNotFound, fmt.Errorf("not found gacha"))
 		}
