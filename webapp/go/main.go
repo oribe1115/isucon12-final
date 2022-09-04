@@ -2345,7 +2345,9 @@ func (h *Handler) health(c echo.Context) error {
 
 // errorResponse returns error.
 func errorResponse(c echo.Context, statusCode int, err error) error {
-	c.Logger().Errorf("status=%d, err=%+v", statusCode, errors.WithStack(err))
+	if 500 <= statusCode {
+		c.Logger().Errorf("status=%d, err=%+v", statusCode, errors.WithStack(err))
+	}
 
 	return c.JSON(statusCode, struct {
 		StatusCode int    `json:"status_code"`
