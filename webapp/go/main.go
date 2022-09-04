@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -271,6 +272,8 @@ func (h *Handler) apiMiddleware(next echo.HandlerFunc) echo.HandlerFunc {
 	}
 }
 
+var playerSessionCache = sync.Map{}
+
 // checkSessionMiddleware
 func (h *Handler) checkSessionMiddleware(next echo.HandlerFunc) echo.HandlerFunc {
 	return func(c echo.Context) error {
@@ -289,31 +292,54 @@ func (h *Handler) checkSessionMiddleware(next echo.HandlerFunc) echo.HandlerFunc
 			return errorResponse(c, http.StatusInternalServerError, ErrGetRequestTime)
 		}
 
-		userSession := new(Session)
-		query := "SELECT * FROM user_sessions WHERE session_id=?"
-		if err := h.getDB(userID).Get(userSession, query, sessID); err != nil {
-			if err == sql.ErrNoRows {
-
-				otherDB := h.getOtherDBs(userID)
-				for _, db := range otherDB {
-					if err = db.Get(userSession, query, sessID); err != nil {
-						continue
-					}
-					return errorResponse(c, http.StatusForbidden, ErrForbidden)
+		userSessionO, ok := playerSessionCache.Load(userID)
+		userSession := userSessionO.(*Session)
+		if !ok {
+			userSession = new(Session)
+			query := "SELECT * FROM user_sessions WHERE user_id=?"
+			if err = h.getDB(userID).Get(userSession, query, userID); err != nil {
+				if err != sql.ErrNoRows {
+					return errorResponse(c, http.StatusInternalServerError, err)
 				}
-
-				return errorResponse(c, http.StatusUnauthorized, ErrUnauthorized)
 			}
-			return errorResponse(c, http.StatusInternalServerError, err)
+			if err == nil {
+				playerSessionCache.Store(userID, userSession)
+			}
 		}
+		if err == nil && userSession.SessionID == sessID && userSession.DeletedAt != nil {
+			return errorResponse(c, http.StatusUnauthorized, ErrUnauthorized)
+		}
+		if err != nil || userSession.SessionID != sessID {
+			query := "SELECT * FROM user_sessions WHERE session_id=?"
+			otherDB := h.getALLDB()
+			for _, db := range otherDB {
+				if err = db.Get(userSession, query, sessID); err != nil {
+					continue
+				}
+				if userSession.UserID == userID && db == h.getDB(userID) {
+					//バグが治らないので対処療法
+					playerSessionCache.Store(userID, userSession)
+					goto MAYBEOK
+				}
+				return errorResponse(c, http.StatusForbidden, ErrForbidden)
+			}
 
-		if userSession.UserID != userID {
-			return errorResponse(c, http.StatusForbidden, ErrForbidden)
+			return errorResponse(c, http.StatusUnauthorized, ErrUnauthorized)
 		}
+	MAYBEOK:
 
 		if userSession.ExpiredAt < requestAt {
-			query = "DELETE FROM user_sessions WHERE session_id=?"
-			if _, err = h.getDB(userID).Exec(query, sessID); err != nil {
+			playerSessionCache.Store(userID, &Session{
+				ID:        userSession.ID,
+				UserID:    userSession.UserID,
+				SessionID: userSession.SessionID,
+				CreatedAt: userSession.CreatedAt,
+				UpdatedAt: requestAt,
+				ExpiredAt: userSession.ExpiredAt,
+				DeletedAt: &requestAt,
+			})
+			query := "DELETE FROM user_sessions WHERE user_id=?"
+			if _, err = h.getDB(userID).Exec(query, userSession.UserID); err != nil {
 				return errorResponse(c, http.StatusInternalServerError, err)
 			}
 			return errorResponse(c, http.StatusUnauthorized, ErrExpiredSession)
@@ -1036,6 +1062,7 @@ func initialize(c echo.Context) error {
 		masterVersion.Store(tmpStr)
 		return nil
 	})
+	playerSessionCache = sync.Map{}
 	err := eg.Wait()
 	initializeEnd = time.Now()
 	maybeprepare.Store(true)
@@ -1193,25 +1220,20 @@ func (h *Handler) createUser(c echo.Context) error {
 	}
 
 	// generate session
-	sID, err := h.generateID()
-	if err != nil {
-		return errorResponse(c, http.StatusInternalServerError, err)
-	}
 	sessID, err := generateUUID()
 	if err != nil {
 		return errorResponse(c, http.StatusInternalServerError, err)
 	}
 	sess := &Session{
-		ID:        sID,
+		ID:        0,
 		UserID:    user.ID,
 		SessionID: sessID,
 		CreatedAt: requestAt,
 		UpdatedAt: requestAt,
 		ExpiredAt: requestAt + 86400,
 	}
-	// TXをはがしたので要注意
 	query = "INSERT INTO user_sessions(id, user_id, session_id, created_at, updated_at, expired_at) VALUES (?, ?, ?, ?, ?, ?)"
-	if _, err = h.getDB(sess.UserID).Exec(query, sess.ID, sess.UserID, sess.SessionID, sess.CreatedAt, sess.UpdatedAt, sess.ExpiredAt); err != nil {
+	if _, err = tx.Exec(query, sess.ID, sess.UserID, sess.SessionID, sess.CreatedAt, sess.UpdatedAt, sess.ExpiredAt); err != nil {
 		return errorResponse(c, http.StatusInternalServerError, err)
 	}
 
@@ -1219,6 +1241,7 @@ func (h *Handler) createUser(c echo.Context) error {
 	if err != nil {
 		return errorResponse(c, http.StatusInternalServerError, err)
 	}
+	playerSessionCache.Store(sess.UserID, sess)
 
 	return successResponse(c, &CreateUserResponse{
 		UserID:           user.ID,
@@ -1251,6 +1274,15 @@ func (h *Handler) login(c echo.Context) error {
 		return errorResponse(c, http.StatusBadRequest, err)
 	}
 
+	// check ban
+	isBan, err := h.checkBan(req.UserID)
+	if err != nil {
+		return errorResponse(c, http.StatusInternalServerError, err)
+	}
+	if isBan {
+		return errorResponse(c, http.StatusForbidden, ErrForbidden)
+	}
+
 	requestAt, err := getRequestTime(c)
 	if err != nil {
 		return errorResponse(c, http.StatusInternalServerError, ErrGetRequestTime)
@@ -1263,15 +1295,6 @@ func (h *Handler) login(c echo.Context) error {
 			return errorResponse(c, http.StatusNotFound, ErrUserNotFound)
 		}
 		return errorResponse(c, http.StatusInternalServerError, err)
-	}
-
-	// check ban
-	isBan, err := h.checkBan(user.ID)
-	if err != nil {
-		return errorResponse(c, http.StatusInternalServerError, err)
-	}
-	if isBan {
-		return errorResponse(c, http.StatusForbidden, ErrForbidden)
 	}
 
 	// viewer id check
@@ -1293,16 +1316,12 @@ func (h *Handler) login(c echo.Context) error {
 	if _, err = tx.Exec(query, req.UserID); err != nil {
 		return errorResponse(c, http.StatusInternalServerError, err)
 	}
-	sID, err := h.generateID()
-	if err != nil {
-		return errorResponse(c, http.StatusInternalServerError, err)
-	}
 	sessID, err := generateUUID()
 	if err != nil {
 		return errorResponse(c, http.StatusInternalServerError, err)
 	}
 	sess := &Session{
-		ID:        sID,
+		ID:        0,
 		UserID:    req.UserID,
 		SessionID: sessID,
 		CreatedAt: requestAt,
@@ -1328,6 +1347,7 @@ func (h *Handler) login(c echo.Context) error {
 		if err != nil {
 			return errorResponse(c, http.StatusInternalServerError, err)
 		}
+		playerSessionCache.Store(sess.UserID, sess)
 
 		return successResponse(c, &LoginResponse{
 			ViewerID:         req.ViewerID,
@@ -1352,6 +1372,7 @@ func (h *Handler) login(c echo.Context) error {
 	if err != nil {
 		return errorResponse(c, http.StatusInternalServerError, err)
 	}
+	playerSessionCache.Store(sess.UserID, sess)
 
 	return successResponse(c, &LoginResponse{
 		ViewerID:         req.ViewerID,
@@ -1607,7 +1628,7 @@ func (h *Handler) drawGacha(c echo.Context) error {
 	}
 	// TXをはがしたので要注意
 	query = "INSERT INTO user_presents(id, user_id, sent_at, item_type, item_id, amount, present_message, created_at, updated_at) VALUES (:id, :user_id, :sent_at, :item_type, :item_id, :amount, :present_message, :created_at, :updated_at)"
-	if _, err := h.getDB(userID).NamedExec(query, presents); err != nil {
+	if _, err := tx.NamedExec(query, presents); err != nil {
 		return errorResponse(c, http.StatusInternalServerError, err)
 	}
 
@@ -1657,7 +1678,7 @@ func (h *Handler) listPresent(c echo.Context) error {
 	presentList := []*UserPresent{}
 	query := `
 	SELECT * FROM user_presents 
-	WHERE user_id = ? AND deleted_at IS NULL
+	WHERE user_id = ? 
 	ORDER BY created_at DESC, id
 	LIMIT ? OFFSET ?`
 	if err = h.getDB(userID).Select(&presentList, query, userID, PresentCountPerPage, offset); err != nil {
@@ -1665,7 +1686,7 @@ func (h *Handler) listPresent(c echo.Context) error {
 	}
 
 	var presentCount int
-	if err = h.getDB(userID).Get(&presentCount, "SELECT COUNT(*) FROM user_presents WHERE user_id = ? AND deleted_at IS NULL", userID); err != nil {
+	if err = h.getDB(userID).Get(&presentCount, "SELECT COUNT(*) FROM user_presents WHERE user_id = ?", userID); err != nil {
 		return errorResponse(c, http.StatusInternalServerError, err)
 	}
 
@@ -1717,7 +1738,7 @@ func (h *Handler) receivePresent(c echo.Context) error {
 	}
 
 	// user_presentsに入っているが未取得のプレゼント取得
-	query := "SELECT * FROM user_presents WHERE id IN (?) AND deleted_at IS NULL"
+	query := "SELECT * FROM user_presents WHERE id IN (?)"
 	query, params, err := sqlx.In(query, req.PresentIDs)
 	if err != nil {
 		return errorResponse(c, http.StatusBadRequest, err)
@@ -1738,12 +1759,17 @@ func (h *Handler) receivePresent(c echo.Context) error {
 		return errorResponse(c, http.StatusInternalServerError, err)
 	}
 	defer tx.Rollback() //nolint:errcheck
-	query = "UPDATE user_presents SET deleted_at=?, updated_at=? WHERE id IN (?)"
+	query = "DELETE FROM user_presents WHERE id IN (?)"
 	ids := make([]int64, 0, len(obtainPresent))
 	for _, v := range obtainPresent {
 		ids = append(ids, v.ID)
+		if v.DeletedAt != nil {
+			return errorResponse(c, http.StatusInternalServerError, fmt.Errorf("received present"))
+		}
+		v.DeletedAt = &requestAt
+		v.UpdatedAt = requestAt
 	}
-	query, params, err = sqlx.In(query, requestAt, requestAt, ids)
+	query, params, err = sqlx.In(query, ids)
 	if err != nil {
 		return errorResponse(c, http.StatusBadRequest, err)
 	}
@@ -1751,18 +1777,15 @@ func (h *Handler) receivePresent(c echo.Context) error {
 	if err != nil {
 		return errorResponse(c, http.StatusInternalServerError, err)
 	}
+	query = "INSERT INTO user_presents_deleted(id, user_id, sent_at, item_type, item_id, amount, present_message, created_at, updated_at, deleted_at) VALUES (:id, :user_id, :sent_at, :item_type, :item_id, :amount, :present_message, :created_at, :updated_at, :deleted_at)"
+	if _, err := tx.NamedExec(query, obtainPresent); err != nil {
+		return errorResponse(c, http.StatusInternalServerError, err)
+	}
 
 	obtainItemsRequest := make([]*ObtainItemDatum, 0)
 
 	// 配布処理
-	for i := range obtainPresent {
-		if obtainPresent[i].DeletedAt != nil {
-			return errorResponse(c, http.StatusInternalServerError, fmt.Errorf("received present"))
-		}
-
-		obtainPresent[i].UpdatedAt = requestAt
-		obtainPresent[i].DeletedAt = &requestAt
-		v := obtainPresent[i]
+	for _, v := range obtainPresent {
 
 		datum := &ObtainItemDatum{
 			ItemID:       v.ItemID,
@@ -2343,7 +2366,9 @@ func (h *Handler) health(c echo.Context) error {
 
 // errorResponse returns error.
 func errorResponse(c echo.Context, statusCode int, err error) error {
-	c.Logger().Errorf("status=%d, err=%+v", statusCode, errors.WithStack(err))
+	if 500 <= statusCode {
+		c.Logger().Errorf("status=%d, err=%+v", statusCode, errors.WithStack(err))
+	}
 
 	return c.JSON(statusCode, struct {
 		StatusCode int    `json:"status_code"`
