@@ -294,10 +294,10 @@ func (h *Handler) checkSessionMiddleware(next echo.HandlerFunc) echo.HandlerFunc
 
 		userSessionO, ok := playerSessionCache.Load(userID)
 		userSession := userSessionO.(*Session)
-		if userSession.DeletedAt != nil {
+		if userSession.SessionID == sessID && userSession.DeletedAt != nil {
 			return errorResponse(c, http.StatusUnauthorized, ErrUnauthorized)
 		}
-		if !ok {
+		if !ok || userSession.SessionID != sessID {
 			query := "SELECT * FROM user_sessions WHERE user_id=?"
 			if err = h.getDB(userID).Get(userSession, query, userID); err != nil {
 				if err == sql.ErrNoRows {
@@ -315,10 +315,6 @@ func (h *Handler) checkSessionMiddleware(next echo.HandlerFunc) echo.HandlerFunc
 				}
 				return errorResponse(c, http.StatusInternalServerError, err)
 			}
-		}
-
-		if userSession.SessionID != sessID {
-			return errorResponse(c, http.StatusUnauthorized, ErrUnauthorized)
 		}
 
 		if userSession.ExpiredAt < requestAt {
