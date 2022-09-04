@@ -316,7 +316,7 @@ func (h *Handler) checkSessionMiddleware(next echo.HandlerFunc) echo.HandlerFunc
 				if err = db.Get(userSession, query, sessID); err != nil {
 					continue
 				}
-				if userSession.UserID == userID {
+				if userSession.UserID == userID && db == h.getDB(userID) {
 					//バグが治らないので対処療法
 					playerSessionCache.Store(userID, userSession)
 					goto MAYBEOK
