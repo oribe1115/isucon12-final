@@ -297,24 +297,25 @@ func (h *Handler) checkSessionMiddleware(next echo.HandlerFunc) echo.HandlerFunc
 		if userSession.SessionID == sessID && userSession.DeletedAt != nil {
 			return errorResponse(c, http.StatusUnauthorized, ErrUnauthorized)
 		}
-		if !ok || userSession.SessionID != sessID {
+		if !ok {
 			query := "SELECT * FROM user_sessions WHERE user_id=?"
 			if err = h.getDB(userID).Get(userSession, query, userID); err != nil {
-				if err == sql.ErrNoRows {
-
-					query = "SELECT * FROM user_sessions WHERE session_id=?"
-					otherDB := h.getALLDB()
-					for _, db := range otherDB {
-						if err = db.Get(userSession, query, sessID); err != nil {
-							continue
-						}
-						return errorResponse(c, http.StatusForbidden, ErrForbidden)
-					}
-
-					return errorResponse(c, http.StatusUnauthorized, ErrUnauthorized)
+				if err != sql.ErrNoRows {
+					return errorResponse(c, http.StatusInternalServerError, err)
 				}
-				return errorResponse(c, http.StatusInternalServerError, err)
 			}
+		}
+		if err != nil || userSession.SessionID != sessID {
+			query := "SELECT * FROM user_sessions WHERE session_id=?"
+			otherDB := h.getALLDB()
+			for _, db := range otherDB {
+				if err = db.Get(userSession, query, sessID); err != nil {
+					continue
+				}
+				return errorResponse(c, http.StatusForbidden, ErrForbidden)
+			}
+
+			return errorResponse(c, http.StatusUnauthorized, ErrUnauthorized)
 		}
 
 		if userSession.ExpiredAt < requestAt {
