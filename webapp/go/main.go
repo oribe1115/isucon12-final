@@ -294,9 +294,6 @@ func (h *Handler) checkSessionMiddleware(next echo.HandlerFunc) echo.HandlerFunc
 
 		userSessionO, ok := playerSessionCache.Load(userID)
 		userSession := userSessionO.(*Session)
-		if userSession.SessionID == sessID && userSession.DeletedAt != nil {
-			return errorResponse(c, http.StatusUnauthorized, ErrUnauthorized)
-		}
 		if !ok {
 			userSession = new(Session)
 			query := "SELECT * FROM user_sessions WHERE user_id=?"
@@ -308,6 +305,9 @@ func (h *Handler) checkSessionMiddleware(next echo.HandlerFunc) echo.HandlerFunc
 			if err == nil {
 				playerSessionCache.Store(userID, userSession)
 			}
+		}
+		if userSession.SessionID == sessID && userSession.DeletedAt != nil {
+			return errorResponse(c, http.StatusUnauthorized, ErrUnauthorized)
 		}
 		if err != nil || userSession.SessionID != sessID {
 			query := "SELECT * FROM user_sessions WHERE session_id=?"
