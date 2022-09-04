@@ -126,7 +126,7 @@ func main() {
 	time.Local = time.FixedZone("Local", 9*60*60)
 
 	// ソケットファイルの場所
-	socketFilePath := "/temp/isucon.sock"
+	socketFilePath := "/home/isucon/isucon.sock"
 
 	// リスナーを作成
 	os.Remove(socketFilePath)
