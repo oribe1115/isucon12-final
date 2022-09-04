@@ -1742,6 +1742,9 @@ func (h *Handler) receivePresent(c echo.Context) error {
 	ids := make([]int64, 0, len(obtainPresent))
 	for _, v := range obtainPresent {
 		ids = append(ids, v.ID)
+		if v.DeletedAt != nil {
+			return errorResponse(c, http.StatusInternalServerError, fmt.Errorf("received present"))
+		}
 		v.DeletedAt = &requestAt
 		v.UpdatedAt = requestAt
 	}
@@ -1761,14 +1764,7 @@ func (h *Handler) receivePresent(c echo.Context) error {
 	obtainItemsRequest := make([]*ObtainItemDatum, 0)
 
 	// 配布処理
-	for i := range obtainPresent {
-		if obtainPresent[i].DeletedAt != nil {
-			return errorResponse(c, http.StatusInternalServerError, fmt.Errorf("received present"))
-		}
-
-		obtainPresent[i].UpdatedAt = requestAt
-		obtainPresent[i].DeletedAt = &requestAt
-		v := obtainPresent[i]
+	for _, v := range obtainPresent {
 
 		datum := &ObtainItemDatum{
 			ItemID:       v.ItemID,
