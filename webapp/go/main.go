@@ -1332,7 +1332,6 @@ func (h *Handler) login(c echo.Context) error {
 	if _, err = tx.Exec(query, sess.ID, sess.UserID, sess.SessionID, sess.CreatedAt, sess.UpdatedAt, sess.ExpiredAt); err != nil {
 		return errorResponse(c, http.StatusInternalServerError, err)
 	}
-	playerSessionCache.Store(sess.UserID, sess)
 
 	// すでにログインしているユーザはログイン処理をしない
 	if isCompleteTodayLogin(time.Unix(user.LastActivatedAt, 0), time.Unix(requestAt, 0)) {
@@ -1348,6 +1347,7 @@ func (h *Handler) login(c echo.Context) error {
 		if err != nil {
 			return errorResponse(c, http.StatusInternalServerError, err)
 		}
+		playerSessionCache.Store(sess.UserID, sess)
 
 		return successResponse(c, &LoginResponse{
 			ViewerID:         req.ViewerID,
@@ -1372,6 +1372,7 @@ func (h *Handler) login(c echo.Context) error {
 	if err != nil {
 		return errorResponse(c, http.StatusInternalServerError, err)
 	}
+	playerSessionCache.Store(sess.UserID, sess)
 
 	return successResponse(c, &LoginResponse{
 		ViewerID:         req.ViewerID,
