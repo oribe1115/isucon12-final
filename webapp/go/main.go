@@ -290,11 +290,12 @@ func (h *Handler) checkSessionMiddleware(next echo.HandlerFunc) echo.HandlerFunc
 		}
 
 		userSession := new(Session)
-		query := "SELECT * FROM user_sessions WHERE session_id=?"
-		if err := h.getDB(userID).Get(userSession, query, sessID); err != nil {
+		query := "SELECT * FROM user_sessions WHERE user_id=?"
+		if err := h.getDB(userID).Get(userSession, query, userID); err != nil {
 			if err == sql.ErrNoRows {
 
-				otherDB := h.getOtherDBs(userID)
+				query = "SELECT * FROM user_sessions WHERE session_id=?"
+				otherDB := h.getALLDB()
 				for _, db := range otherDB {
 					if err = db.Get(userSession, query, sessID); err != nil {
 						continue
@@ -307,13 +308,13 @@ func (h *Handler) checkSessionMiddleware(next echo.HandlerFunc) echo.HandlerFunc
 			return errorResponse(c, http.StatusInternalServerError, err)
 		}
 
-		if userSession.UserID != userID {
-			return errorResponse(c, http.StatusForbidden, ErrForbidden)
+		if userSession.SessionID != sessID {
+			return errorResponse(c, http.StatusUnauthorized, ErrForbidden)
 		}
 
 		if userSession.ExpiredAt < requestAt {
-			query = "DELETE FROM user_sessions WHERE session_id=?"
-			if _, err = h.getDB(userID).Exec(query, sessID); err != nil {
+			query = "DELETE FROM user_sessions WHERE user_id=?"
+			if _, err = h.getDB(userID).Exec(query, userSession.UserID); err != nil {
 				return errorResponse(c, http.StatusInternalServerError, err)
 			}
 			return errorResponse(c, http.StatusUnauthorized, ErrExpiredSession)
@@ -1193,16 +1194,12 @@ func (h *Handler) createUser(c echo.Context) error {
 	}
 
 	// generate session
-	sID, err := h.generateID()
-	if err != nil {
-		return errorResponse(c, http.StatusInternalServerError, err)
-	}
 	sessID, err := generateUUID()
 	if err != nil {
 		return errorResponse(c, http.StatusInternalServerError, err)
 	}
 	sess := &Session{
-		ID:        sID,
+		ID:        0,
 		UserID:    user.ID,
 		SessionID: sessID,
 		CreatedAt: requestAt,
@@ -1211,7 +1208,7 @@ func (h *Handler) createUser(c echo.Context) error {
 	}
 	// TXをはがしたので要注意
 	query = "INSERT INTO user_sessions(id, user_id, session_id, created_at, updated_at, expired_at) VALUES (?, ?, ?, ?, ?, ?)"
-	if _, err = h.getDB(sess.UserID).Exec(query, sess.ID, sess.UserID, sess.SessionID, sess.CreatedAt, sess.UpdatedAt, sess.ExpiredAt); err != nil {
+	if _, err = tx.Exec(query, sess.ID, sess.UserID, sess.SessionID, sess.CreatedAt, sess.UpdatedAt, sess.ExpiredAt); err != nil {
 		return errorResponse(c, http.StatusInternalServerError, err)
 	}
 
@@ -1251,6 +1248,15 @@ func (h *Handler) login(c echo.Context) error {
 		return errorResponse(c, http.StatusBadRequest, err)
 	}
 
+	// check ban
+	isBan, err := h.checkBan(req.UserID)
+	if err != nil {
+		return errorResponse(c, http.StatusInternalServerError, err)
+	}
+	if isBan {
+		return errorResponse(c, http.StatusForbidden, ErrForbidden)
+	}
+
 	requestAt, err := getRequestTime(c)
 	if err != nil {
 		return errorResponse(c, http.StatusInternalServerError, ErrGetRequestTime)
@@ -1263,15 +1269,6 @@ func (h *Handler) login(c echo.Context) error {
 			return errorResponse(c, http.StatusNotFound, ErrUserNotFound)
 		}
 		return errorResponse(c, http.StatusInternalServerError, err)
-	}
-
-	// check ban
-	isBan, err := h.checkBan(user.ID)
-	if err != nil {
-		return errorResponse(c, http.StatusInternalServerError, err)
-	}
-	if isBan {
-		return errorResponse(c, http.StatusForbidden, ErrForbidden)
 	}
 
 	// viewer id check
@@ -1293,16 +1290,12 @@ func (h *Handler) login(c echo.Context) error {
 	if _, err = tx.Exec(query, req.UserID); err != nil {
 		return errorResponse(c, http.StatusInternalServerError, err)
 	}
-	sID, err := h.generateID()
-	if err != nil {
-		return errorResponse(c, http.StatusInternalServerError, err)
-	}
 	sessID, err := generateUUID()
 	if err != nil {
 		return errorResponse(c, http.StatusInternalServerError, err)
 	}
 	sess := &Session{
-		ID:        sID,
+		ID:        0,
 		UserID:    req.UserID,
 		SessionID: sessID,
 		CreatedAt: requestAt,
