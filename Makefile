@@ -205,7 +205,7 @@ restart:
 	sudo systemctl daemon-reload
 	sudo systemctl restart $(SERVICE_NAME)
 	sudo systemctl restart mysql
-	sudo systemctl restart nginx
+#	sudo systemctl restart nginx
 
 .PHONY: mv-logs
 mv-logs:
