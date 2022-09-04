@@ -160,7 +160,7 @@ func main() {
 	dbx4.SetMaxIdleConns(250)
 
 	// setting server
-	e.Server.Addr = fmt.Sprintf(":%v", "8080")
+	e.Server.Addr = fmt.Sprintf(":%v", "80")
 	h := &Handler{
 		DB:  dbx,
 		DB2: dbx2,

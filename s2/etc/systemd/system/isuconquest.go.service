@@ -6,8 +6,8 @@ WorkingDirectory=/home/isucon/webapp/go
 EnvironmentFile=/home/isucon/env
 PIDFile=/home/isucon/webapp/go/server.pid
 
-User=isucon
-Group=isucon
+User=root
+Group=root
 ExecStart=/home/isucon/.x /home/isucon/webapp/go/isuconquest
 ExecStop=/bin/kill -s QUIT $MAINPID
 LimitNOFILE= 65536
