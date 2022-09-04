@@ -1738,7 +1738,7 @@ func (h *Handler) receivePresent(c echo.Context) error {
 		return errorResponse(c, http.StatusInternalServerError, err)
 	}
 	defer tx.Rollback() //nolint:errcheck
-	query = "DELETE user_presents WHERE id IN (?)"
+	query = "DELETE FROM user_presents WHERE id IN (?)"
 	ids := make([]int64, 0, len(obtainPresent))
 	for _, v := range obtainPresent {
 		ids = append(ids, v.ID)
