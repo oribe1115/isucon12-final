@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -271,6 +272,8 @@ func (h *Handler) apiMiddleware(next echo.HandlerFunc) echo.HandlerFunc {
 	}
 }
 
+var playerSessionCache = sync.Map{}
+
 // checkSessionMiddleware
 func (h *Handler) checkSessionMiddleware(next echo.HandlerFunc) echo.HandlerFunc {
 	return func(c echo.Context) error {
@@ -289,23 +292,29 @@ func (h *Handler) checkSessionMiddleware(next echo.HandlerFunc) echo.HandlerFunc
 			return errorResponse(c, http.StatusInternalServerError, ErrGetRequestTime)
 		}
 
-		userSession := new(Session)
-		query := "SELECT * FROM user_sessions WHERE user_id=?"
-		if err := h.getDB(userID).Get(userSession, query, userID); err != nil {
-			if err == sql.ErrNoRows {
+		userSessionO, ok := playerSessionCache.Load(userID)
+		userSession := userSessionO.(*Session)
+		if userSession.DeletedAt != nil {
+			return errorResponse(c, http.StatusUnauthorized, ErrUnauthorized)
+		}
+		if !ok {
+			query := "SELECT * FROM user_sessions WHERE user_id=?"
+			if err = h.getDB(userID).Get(userSession, query, userID); err != nil {
+				if err == sql.ErrNoRows {
 
-				query = "SELECT * FROM user_sessions WHERE session_id=?"
-				otherDB := h.getALLDB()
-				for _, db := range otherDB {
-					if err = db.Get(userSession, query, sessID); err != nil {
-						continue
+					query = "SELECT * FROM user_sessions WHERE session_id=?"
+					otherDB := h.getALLDB()
+					for _, db := range otherDB {
+						if err = db.Get(userSession, query, sessID); err != nil {
+							continue
+						}
+						return errorResponse(c, http.StatusForbidden, ErrForbidden)
 					}
-					return errorResponse(c, http.StatusForbidden, ErrForbidden)
-				}
 
-				return errorResponse(c, http.StatusUnauthorized, ErrUnauthorized)
+					return errorResponse(c, http.StatusUnauthorized, ErrUnauthorized)
+				}
+				return errorResponse(c, http.StatusInternalServerError, err)
 			}
-			return errorResponse(c, http.StatusInternalServerError, err)
 		}
 
 		if userSession.SessionID != sessID {
@@ -313,7 +322,16 @@ func (h *Handler) checkSessionMiddleware(next echo.HandlerFunc) echo.HandlerFunc
 		}
 
 		if userSession.ExpiredAt < requestAt {
-			query = "DELETE FROM user_sessions WHERE user_id=?"
+			playerSessionCache.Store(userID, &Session{
+				ID:        userSession.ID,
+				UserID:    userSession.UserID,
+				SessionID: userSession.SessionID,
+				CreatedAt: userSession.CreatedAt,
+				UpdatedAt: requestAt,
+				ExpiredAt: userSession.ExpiredAt,
+				DeletedAt: &requestAt,
+			})
+			query := "DELETE FROM user_sessions WHERE user_id=?"
 			if _, err = h.getDB(userID).Exec(query, userSession.UserID); err != nil {
 				return errorResponse(c, http.StatusInternalServerError, err)
 			}
@@ -1216,6 +1234,7 @@ func (h *Handler) createUser(c echo.Context) error {
 	if err != nil {
 		return errorResponse(c, http.StatusInternalServerError, err)
 	}
+	playerSessionCache.Store(user.ID, sess)
 
 	return successResponse(c, &CreateUserResponse{
 		UserID:           user.ID,
@@ -1306,6 +1325,7 @@ func (h *Handler) login(c echo.Context) error {
 	if _, err = tx.Exec(query, sess.ID, sess.UserID, sess.SessionID, sess.CreatedAt, sess.UpdatedAt, sess.ExpiredAt); err != nil {
 		return errorResponse(c, http.StatusInternalServerError, err)
 	}
+	playerSessionCache.Store(user.ID, sess)
 
 	// すでにログインしているユーザはログイン処理をしない
 	if isCompleteTodayLogin(time.Unix(user.LastActivatedAt, 0), time.Unix(requestAt, 0)) {
