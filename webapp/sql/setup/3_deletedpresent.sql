@@ -17,4 +17,4 @@ CREATE TABLE `user_presents_deleted` (
 
 INSERT INTO user_presents_deleted (id, user_id, sent_at, item_type, item_id, amount, present_message, created_at, updated_at, deleted_at)
   SELECT * FROM user_presents WHERE NOT (deleted_at IS NULL);
-DELETE FROM user_presents WHERE (deleted_at IS NULL);
+DELETE FROM user_presents WHERE NOT (deleted_at IS NULL);
