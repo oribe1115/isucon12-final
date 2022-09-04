@@ -78,5 +78,18 @@ max_binlog_size   = 100M
 # binlog_ignore_db	= include_database_name
 
 skip-log-bin
+skip-innodb-doublewrite
 innodb_flush_log_at_trx_commit = 0
+
+#システムメモリーの 50% から 75%
+innodb_buffer_pool_size = 3000MB
+#buffer_poolをこの数に分割して確保(一つあたりが1G以上になるように)
+innodb_buffer_pool_instances = 2 
+# InnoDBの更新ログを記録するディスク上のファイルサイズ(innodb_buffer_pool_sizeの4分の1程度)
+innodb_log_file_size = 750MB
+# innoDBの更新ログを保持するメモリ(default: 8MB)、1Txでの大量のデータの更新に効く
+innodb_log_buffer_size = 20MB
+# Dedicated log writer threads が、低並列な環境ではかえって性能低下をもたらす
+# 2コア以下の環境では、確実にOFFの方が高速
+innodb_log_writer_threads = OFF
 
