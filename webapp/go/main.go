@@ -9,7 +9,6 @@ import (
 	"math"
 	"math/rand"
 	"net/http"
-	_ "net/http/pprof"
 	"os"
 	"os/exec"
 	"strconv"
@@ -27,6 +26,7 @@ import (
 	"github.com/jmoiron/sqlx"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
+	"github.com/labstack/gommon/log"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
 	"golang.org/x/sync/errgroup"
@@ -115,9 +115,9 @@ func (j *JSONSerializer) Deserialize(c echo.Context, i interface{}) error {
 func main() {
 
 	// http.DefaultServeMux.Handle("/debug/fgprof", fgprof.Handler())
-	go func() {
-		http.ListenAndServe(":6060", nil)
-	}()
+	// go func() {
+	// 	http.ListenAndServe(":6060", nil)
+	// }()
 
 	rand.Seed(time.Now().UnixNano())
 	time.Local = time.FixedZone("Local", 9*60*60)
@@ -131,6 +131,9 @@ func main() {
 		AllowMethods: []string{http.MethodGet, http.MethodPost},
 		AllowHeaders: []string{"Content-Type", "x-master-version", "x-session"},
 	}))
+
+	e.Debug = false
+	e.Logger.SetLevel(log.ERROR)
 
 	// connect db
 	dbx, err := connectDB(false, getEnv("ISUCON_DB_HOST", "127.0.0.1"))
@@ -2366,9 +2369,9 @@ func (h *Handler) health(c echo.Context) error {
 
 // errorResponse returns error.
 func errorResponse(c echo.Context, statusCode int, err error) error {
-	if 500 <= statusCode {
-		c.Logger().Errorf("status=%d, err=%+v", statusCode, errors.WithStack(err))
-	}
+	// if 500 <= statusCode {
+	// 	c.Logger().Errorf("status=%d, err=%+v", statusCode, errors.WithStack(err))
+	// }
 
 	return c.JSON(statusCode, struct {
 		StatusCode int    `json:"status_code"`
