@@ -32,11 +32,11 @@ setup: install-tools git-setup
 
 # 設定ファイルなどを取得してgit管理下に配置する
 .PHONY: get-conf
-get-conf: check-server-id get-db-conf get-nginx-conf get-service-file get-envsh
+get-conf: check-server-id get-db-conf get-nginx-conf get-service-file get-kernel get-envsh
 
 # リポジトリ内の設定ファイルをそれぞれ配置する
 .PHONY: deploy-conf
-deploy-conf: check-server-id deploy-db-conf deploy-nginx-conf deploy-service-file deploy-envsh
+deploy-conf: check-server-id deploy-db-conf deploy-nginx-conf deploy-service-file deploy-kernel deploy-envsh
 
 # ベンチマークを走らせる直前に実行する
 .PHONY: bench
@@ -166,6 +166,10 @@ get-service-file:
 	sudo cp $(SYSTEMD_PATH)/$(SERVICE_NAME) ~/$(SERVER_ID)/etc/systemd/system/$(SERVICE_NAME)
 	sudo chown $(USER) ~/$(SERVER_ID)/etc/systemd/system/$(SERVICE_NAME)
 
+.PHONY: get-kernel
+get-kernel:
+	touch ~/$(SERVER_ID)/etc/sysctl.d/100-isucon.conf
+
 .PHONY: get-envsh
 get-envsh:
 	cp ~/$(ENV_FILE) ~/$(SERVER_ID)/home/isucon/$(ENV_FILE)
@@ -181,6 +185,11 @@ deploy-nginx-conf:
 .PHONY: deploy-service-file
 deploy-service-file:
 	sudo cp ~/$(SERVER_ID)/etc/systemd/system/$(SERVICE_NAME) $(SYSTEMD_PATH)/$(SERVICE_NAME)
+
+.PHONY: deploy-kernel
+deploy-kernel:
+	sudo cp ~/$(SERVER_ID)/etc/sysctl.d/100-isucon.conf /etc/sysctl.d/100-isucon.conf
+	sudo sysctl -p /etc/sysctl.d/100-isucon.conf >> /dev/null
 
 .PHONY: deploy-envsh
 deploy-envsh:
