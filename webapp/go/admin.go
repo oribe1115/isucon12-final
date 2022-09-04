@@ -565,6 +565,12 @@ func (h *Handler) adminUpdateMaster(c echo.Context) error {
 		return errorResponse(c, http.StatusInternalServerError, err)
 	}
 
+	if versionMasterRecs != nil {
+		tmpStr := new(string)
+		*tmpStr = activeMaster.MasterVersion
+		masterVersion.Store(tmpStr)
+	}
+
 	return successResponse(c, &AdminUpdateMasterResponse{
 		VersionMaster: activeMaster,
 	})

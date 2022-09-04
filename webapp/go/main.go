@@ -53,6 +53,10 @@ const (
 	SQLDirectory string = "../sql/"
 )
 
+var (
+	masterVersion atomic.Pointer[string]
+)
+
 type Handler struct {
 	DB  *sqlx.DB // admin用DB兼任
 	DB2 *sqlx.DB
@@ -223,16 +227,7 @@ func (h *Handler) apiMiddleware(next echo.HandlerFunc) echo.HandlerFunc {
 		c.Set("requestTime", requestAt.Unix())
 
 		// マスタ確認
-		query := "SELECT * FROM version_masters WHERE status=1"
-		masterVersion := new(VersionMaster)
-		if err := h.getDB(0 /* どこでもよい */).Get(masterVersion, query); err != nil {
-			if err == sql.ErrNoRows {
-				return errorResponse(c, http.StatusNotFound, fmt.Errorf("active master version is not found"))
-			}
-			return errorResponse(c, http.StatusInternalServerError, err)
-		}
-
-		if masterVersion.MasterVersion != c.Request().Header.Get("x-master-version") {
+		if *masterVersion.Load() != c.Request().Header.Get("x-master-version") {
 			return errorResponse(c, http.StatusUnprocessableEntity, ErrInvalidMasterVersion)
 		}
 
@@ -1000,7 +995,26 @@ func initialize(c echo.Context) error {
 		return resp.Body.Close()
 	})
 	eg.Go(func() error {
-		return initializeDB(c)
+		err := initializeDB(c)
+		if err != nil {
+			return err
+		}
+
+		//masterVersion
+		dbx, err := connectDB(true, getEnv("ISUCON_DB_HOST", "127.0.0.1"))
+		if err != nil {
+			return err
+		}
+		defer dbx.Close()
+		query := "SELECT * FROM version_masters WHERE status=1"
+		var masterVersionTmp VersionMaster
+		if err := dbx.Get(&masterVersionTmp, query); err != nil {
+			return err
+		}
+		tmpStr := new(string)
+		*tmpStr = masterVersionTmp.MasterVersion
+		masterVersion.Store(tmpStr)
+		return nil
 	})
 	err := eg.Wait()
 	initializeEnd = time.Now()
