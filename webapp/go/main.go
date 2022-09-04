@@ -306,7 +306,7 @@ func (h *Handler) checkSessionMiddleware(next echo.HandlerFunc) echo.HandlerFunc
 				playerSessionCache.Store(userID, userSession)
 			}
 		}
-		if userSession.SessionID == sessID && userSession.DeletedAt != nil {
+		if err == nil && userSession.SessionID == sessID && userSession.DeletedAt != nil {
 			return errorResponse(c, http.StatusUnauthorized, ErrUnauthorized)
 		}
 		if err != nil || userSession.SessionID != sessID {
