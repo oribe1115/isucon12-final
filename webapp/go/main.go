@@ -298,11 +298,15 @@ func (h *Handler) checkSessionMiddleware(next echo.HandlerFunc) echo.HandlerFunc
 			return errorResponse(c, http.StatusUnauthorized, ErrUnauthorized)
 		}
 		if !ok {
+			userSession = new(Session)
 			query := "SELECT * FROM user_sessions WHERE user_id=?"
 			if err = h.getDB(userID).Get(userSession, query, userID); err != nil {
 				if err != sql.ErrNoRows {
 					return errorResponse(c, http.StatusInternalServerError, err)
 				}
+			}
+			if err == nil {
+				playerSessionCache.Store(userID, userSession)
 			}
 		}
 		if err != nil || userSession.SessionID != sessID {
