@@ -41,3 +41,9 @@ echo "LOAD DATA INFILE '${SECURE_DIR}5_user_presents_not_receive_data.tsv' REPLA
         --host "$ISUCON_DB_HOST" \
         --port "$ISUCON_DB_PORT" \
         "$ISUCON_DB_NAME" 
+
+echo "delete from user_presents_deleted WHERE id IN (select id from user_presents WHERE deleted_at IS NULL)" | mysql -u"$ISUCON_DB_USER" \
+		-p"$ISUCON_DB_PASSWORD" \
+		--host "$ISUCON_DB_HOST" \
+		--port "$ISUCON_DB_PORT" \
+		"$ISUCON_DB_NAME"
