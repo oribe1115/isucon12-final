@@ -436,7 +436,7 @@ func (h *Handler) obtainLoginBonus(tx *sqlx.Tx, userID int64, requestAt int64) (
 	// 	return nil, err
 	// }
 	query := "SELECT * FROM login_bonus_masters WHERE start_at <= ? AND id != 3" //延長戦でfailしないためのベンチマークハック
-	if err := tx.Select(&loginBonuses, query); err != nil {
+	if err := tx.Select(&loginBonuses, query, requestAt); err != nil {
 		return nil, err
 	}
 
