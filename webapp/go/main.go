@@ -6,15 +6,19 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"math"
 	"math/rand"
+	"net"
 	"net/http"
 	_ "net/http/pprof"
 	"os"
 	"os/exec"
+	"os/signal"
 	"strconv"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/bwmarrin/snowflake"
@@ -121,8 +125,43 @@ func main() {
 	rand.Seed(time.Now().UnixNano())
 	time.Local = time.FixedZone("Local", 9*60*60)
 
+	// ソケットファイルの場所
+	socketFilePath := "/temp/isucon.sock"
+
+	// リスナーを作成
+	os.Remove(socketFilePath)
+	listener, err := net.Listen("unix", socketFilePath)
+	if err != nil {
+		log.Panic(err)
+	}
+
+	// ソケットファイルをNginxから書き込めるように権限を変える
+	if err := os.Chmod(socketFilePath, 0777); err != nil {
+		log.Panic(err)
+	}
+
+	// ソケットファイルを削除して終了するための関数
+	// (消さないと新たなソケットが作れず再起動に失敗する)
+	closeFunc := func() {
+		listener.Close()
+		os.Remove(socketFilePath)
+		os.Exit(0)
+	}
+
+	// 異常終了を検知し、検知したらソケットファイルを削除
+	s := make(chan os.Signal, 1)
+	signal.Notify(s, os.Interrupt, os.Kill, syscall.SIGTERM)
+	go func(s chan os.Signal) {
+		<-s
+		closeFunc()
+	}(s)
+
+	// 正常に終了してもソケットファイルを削除
+	defer closeFunc()
+
 	e := echo.New()
 	e.JSONSerializer = &JSONSerializer{}
+	e.Listener = listener
 	// e.Use(middleware.Logger())
 	e.Use(middleware.Recover())
 	e.Use(middleware.CORSWithConfig(middleware.CORSConfig{
