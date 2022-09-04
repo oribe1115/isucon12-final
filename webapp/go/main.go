@@ -1607,7 +1607,7 @@ func (h *Handler) drawGacha(c echo.Context) error {
 	}
 	// TXをはがしたので要注意
 	query = "INSERT INTO user_presents(id, user_id, sent_at, item_type, item_id, amount, present_message, created_at, updated_at) VALUES (:id, :user_id, :sent_at, :item_type, :item_id, :amount, :present_message, :created_at, :updated_at)"
-	if _, err := h.getDB(userID).NamedExec(query, presents); err != nil {
+	if _, err := tx.NamedExec(query, presents); err != nil {
 		return errorResponse(c, http.StatusInternalServerError, err)
 	}
 
@@ -1657,7 +1657,7 @@ func (h *Handler) listPresent(c echo.Context) error {
 	presentList := []*UserPresent{}
 	query := `
 	SELECT * FROM user_presents 
-	WHERE user_id = ? AND deleted_at IS NULL
+	WHERE user_id = ? 
 	ORDER BY created_at DESC, id
 	LIMIT ? OFFSET ?`
 	if err = h.getDB(userID).Select(&presentList, query, userID, PresentCountPerPage, offset); err != nil {
@@ -1665,7 +1665,7 @@ func (h *Handler) listPresent(c echo.Context) error {
 	}
 
 	var presentCount int
-	if err = h.getDB(userID).Get(&presentCount, "SELECT COUNT(*) FROM user_presents WHERE user_id = ? AND deleted_at IS NULL", userID); err != nil {
+	if err = h.getDB(userID).Get(&presentCount, "SELECT COUNT(*) FROM user_presents WHERE user_id = ?", userID); err != nil {
 		return errorResponse(c, http.StatusInternalServerError, err)
 	}
 
@@ -1717,7 +1717,7 @@ func (h *Handler) receivePresent(c echo.Context) error {
 	}
 
 	// user_presentsに入っているが未取得のプレゼント取得
-	query := "SELECT * FROM user_presents WHERE id IN (?) AND deleted_at IS NULL"
+	query := "SELECT * FROM user_presents WHERE id IN (?)"
 	query, params, err := sqlx.In(query, req.PresentIDs)
 	if err != nil {
 		return errorResponse(c, http.StatusBadRequest, err)
@@ -1738,17 +1738,23 @@ func (h *Handler) receivePresent(c echo.Context) error {
 		return errorResponse(c, http.StatusInternalServerError, err)
 	}
 	defer tx.Rollback() //nolint:errcheck
-	query = "UPDATE user_presents SET deleted_at=?, updated_at=? WHERE id IN (?)"
+	query = "DELETE user_presents WHERE id IN (?)"
 	ids := make([]int64, 0, len(obtainPresent))
 	for _, v := range obtainPresent {
 		ids = append(ids, v.ID)
+		v.DeletedAt = &requestAt
+		v.UpdatedAt = requestAt
 	}
-	query, params, err = sqlx.In(query, requestAt, requestAt, ids)
+	query, params, err = sqlx.In(query, ids)
 	if err != nil {
 		return errorResponse(c, http.StatusBadRequest, err)
 	}
 	_, err = tx.Exec(query, params...)
 	if err != nil {
+		return errorResponse(c, http.StatusInternalServerError, err)
+	}
+	query = "INSERT INTO user_presents_deleted(id, user_id, sent_at, item_type, item_id, amount, present_message, created_at, updated_at, deleted_at) VALUES (:id, :user_id, :sent_at, :item_type, :item_id, :amount, :present_message, :created_at, :updated_at, :deleted_at)"
+	if _, err := tx.NamedExec(query, obtainPresent); err != nil {
 		return errorResponse(c, http.StatusInternalServerError, err)
 	}
 
