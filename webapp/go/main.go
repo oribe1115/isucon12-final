@@ -27,8 +27,6 @@ import (
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
 	"golang.org/x/sync/errgroup"
-
-	"github.com/felixge/fgprof"
 )
 
 var (
@@ -92,8 +90,7 @@ func (h *Handler) getOtherDBs(userID int64) []*sqlx.DB {
 
 func main() {
 
-	// http.DefaultServeMux.Handle("/debug/pprof/profile", fgprof.Handler())
-	http.DefaultServeMux.Handle("/debug/fgprof", fgprof.Handler())
+	// http.DefaultServeMux.Handle("/debug/fgprof", fgprof.Handler())
 	go func() {
 		http.ListenAndServe(":6060", nil)
 	}()
